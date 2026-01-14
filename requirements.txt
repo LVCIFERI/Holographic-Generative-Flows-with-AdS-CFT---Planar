@@ -1,0 +1,97 @@
+# =============================================================================
+# AdS/CFT Flow Matching - Requirements
+# =============================================================================
+# Core dependencies for the UV-stabilized generative flow matching framework
+#
+# Document-faithful implementation of:
+# - Section 2: AdS geometry and warp factors
+# - Section 3-4: KG backbone and residual networks
+# - Section 5: Bulk-boundary propagator encoding
+# - Section 7: Sobolev IR prior
+# - Section 9: Hermite and linear flow paths
+# - Algorithm 1: Training procedure
+# - Algorithm 2: Sampling procedure
+#
+# Install with: pip install -r requirements.txt
+#
+# For GPU support, install PyTorch with CUDA first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#   (or cu121 for CUDA 12.1, cu124 for CUDA 12.4)
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Dependencies (required)
+# -----------------------------------------------------------------------------
+
+# Deep Learning Framework
+# PyTorch 2.0+ required for improved performance and torch.compile support
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Numerical Computing
+# NumPy for array operations and data handling
+numpy>=1.21.0
+# SciPy for special functions, sparse matrices, and optimization
+scipy>=1.9.0
+# POT (Python Optimal Transport) for Wasserstein-2 distance computation
+POT>=0.9.0
+
+# Visualization (paper-quality figures)
+# Matplotlib for training curves, sample visualizations, and metrics plots
+matplotlib>=3.5.0
+
+# -----------------------------------------------------------------------------
+# Optional Dependencies
+# -----------------------------------------------------------------------------
+
+# YAML config file support (for loading .yaml configs)
+# Uncomment to enable YAML configuration files
+# pyyaml>=6.0
+
+# Image processing (for save_samples_png in visualization.py)
+# Pillow is typically installed with torchvision, but listed for completeness
+# Pillow>=9.0.0
+
+# Progress bars for training (optional but recommended)
+# tqdm>=4.64.0
+
+# Weights & Biases for experiment tracking (optional)
+# wandb>=0.13.0
+
+# TensorBoard for visualization (optional)
+# tensorboard>=2.10.0
+
+# -----------------------------------------------------------------------------
+# Development Dependencies (optional)
+# -----------------------------------------------------------------------------
+
+# Type checking
+# mypy>=0.990
+
+# Linting
+# flake8>=5.0.0
+# black>=22.0.0
+
+# Testing
+# pytest>=7.0.0
+# pytest-cov>=4.0.0
+
+# -----------------------------------------------------------------------------
+# Version Notes
+# -----------------------------------------------------------------------------
+# 
+# PyTorch 2.0+: Required for torch.compile, improved autograd, and better
+#               memory efficiency. The codebase uses features like:
+#               - torch.fft.fft2/ifft2 (stable API)
+#               - torch.linalg functions
+#               - Improved CUDA graphs support
+#
+# NumPy 1.21+: Required for newer random generator API and type hints
+#
+# SciPy 1.9+: Required for sparse matrix operations in FEM Laplacian
+#             and special functions for spectral computations
+#
+# Matplotlib 3.5+: Required for improved figure styling and PDF export
+#
+# =============================================================================

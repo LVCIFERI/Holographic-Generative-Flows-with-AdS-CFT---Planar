@@ -1,0 +1,218 @@
+================================================================================
+CLI ARGUMENTS REFERENCE - cleanAdS Framework
+================================================================================
+
+================================================================================
+EXAMPLE: FLAT GEOMETRY EXPERIMENT (with non-default args shown)
+================================================================================
+
+python train.py \
+    --dataset checkerboard \
+    --slice_geometry flat \
+    --path_type hermite \
+    --use_radial_hermite \
+    --use_omega_weighting \
+    --r_ir 0.0 \
+    --r_uv 1.0 \
+    --deltas 1.5 1.5 \
+    --use_spectral_encoding \
+    --spectral_n_modes 16 \
+    --residual_hidden 64 \
+    --residual_depth 3 \
+    --epochs 100 \
+    --batch_size 64 \
+    --lr 3e-4 \
+    --use_ema \
+    --ode_solver rk4 \
+    --ode_n_steps 100
+
+================================================================================
+ALL POSSIBLE ARGUMENTS
+================================================================================
+
+--------------------------------------------------------------------------------
+DATASET OPTIONS
+--------------------------------------------------------------------------------
+--dataset               str       Dataset name
+                                  Choices: checkerboard, sphere_checkerboard, 
+                                           hyperboloid_checkerboard, mnist, cifar10
+--n_train_samples       int       Number of training samples (default: 50000)
+--n_viz_samples         int       Number of visualization samples (default: 10000)
+
+--------------------------------------------------------------------------------
+GEOMETRY OPTIONS
+--------------------------------------------------------------------------------
+--slice_geometry        str       AdS slice geometry
+                                  Choices: planar, spherical, hyperbolic, cylindrical, flat,
+                                           planar_hsv, spherical_hsv, hyperbolic_hsv, cylindrical_hsv
+--d                     int       Boundary dimension (default: auto-detected from data)
+
+--------------------------------------------------------------------------------
+HSV (HYPERSCALING-VIOLATING) OPTIONS
+--------------------------------------------------------------------------------
+--hsv_p                 float     HSV parameter p ∈ [0, 1) (default: 0.5)
+--hsv_ads_threshold     float     Threshold for switching to AdS limit (default: 0.95)
+--hsv_use_sigma_bounds  flag      Use sigma bounds for HSV (default: True)
+--no-hsv_use_sigma_bounds flag    Disable sigma bounds
+--hsv_sigma_min         float     HSV sigma min / UV boundary (default: 0.3)
+--hsv_sigma_max         float     HSV sigma max / IR boundary (default: 3.0)
+
+--------------------------------------------------------------------------------
+RADIAL DOMAIN OPTIONS
+--------------------------------------------------------------------------------
+--r_ir                  float     IR cutoff radius (default: 0.0)
+--r_uv                  float     UV cutoff radius (default: 1.0)
+
+--------------------------------------------------------------------------------
+BULK FIELD OPTIONS
+--------------------------------------------------------------------------------
+--deltas                float+    Conformal dimensions (default: 1.5 1.5)
+                                  Must satisfy Δ > d/2 (unitarity bound)
+--lift_noise_sigma      float     UV lift noise σ (default: 0.1)
+
+--------------------------------------------------------------------------------
+IR PRIOR OPTIONS
+--------------------------------------------------------------------------------
+--prior_c_phi           float     Scale for Φ̃ prior (default: 1.0)
+--prior_s_phi           float     Sobolev exponent for Φ̃ (default: 1.0)
+--prior_c_pi            float     Scale for Π̃ prior (default: 0.55)
+--prior_s_pi            float     Sobolev exponent for Π̃ (default: 1.0)
+
+--------------------------------------------------------------------------------
+PATH OPTIONS
+--------------------------------------------------------------------------------
+--path_type             str       Flow matching path type
+                                  Choices: linear, hermite (default: hermite)
+--hermite_pi_scale      float     Hermite Π̃ scale (default: 1.0)
+--backbone_scale        float     Backbone contribution (default: 1.0)
+--use_radial_hermite    flag      Use radial Hermite (stable, auto for HSV)
+--no-use_radial_hermite flag      Use affine Hermite (default for non-HSV)
+
+--------------------------------------------------------------------------------
+LOSS OPTIONS
+--------------------------------------------------------------------------------
+--use_omega_weighting   flag      Weight loss by slice volume ω (default: True)
+--no-use_omega_weighting flag     Unweighted MSE (proxy loss)
+
+--------------------------------------------------------------------------------
+RESIDUAL NETWORK OPTIONS
+--------------------------------------------------------------------------------
+--residual_hidden       int       Residual hidden dimension (default: 512 for MLP, 64 for CNN)
+--residual_depth        int       Residual network depth (default: 6 for MLP, 3 for CNN)
+--residual_time_emb_dim int       Time embedding dimension (default: 128)
+--residual_type         str       Residual parameterization
+                                  Choices: direct (default), potential (for symplectic)
+--cnn_hidden            int       CNN hidden dim (default: 64)
+--cnn_depth             int       CNN depth (default: 3)
+--mlp_hidden            int       MLP hidden dim (default: 512)
+--mlp_depth             int       MLP depth (default: 6)
+
+--------------------------------------------------------------------------------
+ODE INTEGRATION OPTIONS
+--------------------------------------------------------------------------------
+--ode_solver            str       ODE solver type
+                                  Standard: euler, heun, midpoint, rk4 (default)
+                                  Symplectic: leapfrog, implicit_midpoint
+--ode_n_steps           int       Integration steps (default: 100)
+--use_affine_stepping   flag      Step in affine u(r) instead of r
+--implicit_tol          float     Implicit midpoint tolerance (default: 1e-6)
+--implicit_max_iter     int       Implicit midpoint max iterations (default: 10)
+
+--------------------------------------------------------------------------------
+ENCODING OPTIONS
+--------------------------------------------------------------------------------
+--use_spectral_encoding flag      Enable spectral holographic encoding (RECOMMENDED)
+--use_field_encoding    flag      Enable legacy Gaussian blob encoding
+--use_holographic_encoding flag   Enable grid-free holographic encoding
+--use_holographic_grid  flag      Enable grid-based holographic encoding
+--use_image_encoding    flag      Enable image encoding (for MNIST/CIFAR)
+
+--------------------------------------------------------------------------------
+SPECTRAL ENCODING OPTIONS
+--------------------------------------------------------------------------------
+--spectral_n_modes      int       Fourier modes per dimension (default: 16)
+--spectral_decode_resolution int  Output resolution for decoding (default: 64)
+--spectral_decode_method str      Decoding method (default: softargmax)
+                                  Choices: softargmax, phase, density
+--spectral_random_feature_scale float  Scale for random k-vectors (default: 1.0)
+
+--------------------------------------------------------------------------------
+FIELD ENCODING OPTIONS
+--------------------------------------------------------------------------------
+--field_grid_size       int int   Spatial resolution H×W (default: 32 32)
+--field_domain          float+    Domain bounds x_min x_max y_min y_max (default: -4 4 -4 4)
+--field_sigma           float     Gaussian blob width (default: 0.3)
+--field_temperature     float     Softmax temperature (default: 0.1)
+--holographic_regularization float  Stability parameter (default: 1e-2)
+--holographic_normalize flag      Normalize propagator integral
+
+--------------------------------------------------------------------------------
+LAPLACIAN OPTIONS
+--------------------------------------------------------------------------------
+--laplacian_type        str       Laplacian computation method
+                                  Choices: diagonal (default, fast), 
+                                           collocation (exact, hyperbolic only),
+                                           fem (exact, any geometry)
+--collocation_y_method  str       Y-derivative for collocation (default: fd)
+                                  Choices: fd, spectral, chebyshev
+--fem_spectral_method   str       Spectral method for FEM (default: chebyshev)
+                                  Choices: chebyshev, lanczos
+--fem_chebyshev_degree  int       Chebyshev polynomial degree (default: 30)
+--fem_lanczos_steps     int       Lanczos iterations (default: 30)
+
+--------------------------------------------------------------------------------
+TRAINING OPTIONS
+--------------------------------------------------------------------------------
+--epochs                int       Training epochs (default: 5000)
+--batch_size            int       Batch size (default: 64)
+--lr                    float     Learning rate (default: 3e-4)
+--weight_decay          float     L2 regularization (default: 1e-5)
+--warmup_steps          int       LR warmup steps (default: 500)
+--max_grad_norm         float     Gradient clipping (default: 1.0)
+
+--------------------------------------------------------------------------------
+EMA OPTIONS
+--------------------------------------------------------------------------------
+--use_ema               flag      Use exponential moving average
+--no_ema                flag      Disable EMA
+--ema_decay             float     EMA decay rate (default: 0.999)
+
+--------------------------------------------------------------------------------
+LOGGING OPTIONS
+--------------------------------------------------------------------------------
+--log_every             int       Log frequency in steps (default: 100)
+--eval_every            int       Evaluation frequency in epochs (default: 10)
+--save_every            int       Checkpoint frequency in epochs (default: 50)
+--viz_every             int       Visualization frequency in epochs (default: 10)
+
+--------------------------------------------------------------------------------
+OUTPUT OPTIONS
+--------------------------------------------------------------------------------
+--output_dir            str       Output directory (default: ./outputs)
+--name                  str       Experiment name (default: auto-generated)
+--seed                  int       Random seed (default: 42)
+--device                str       Device (default: cuda if available, else cpu)
+
+--------------------------------------------------------------------------------
+BASELINE OPTIONS
+--------------------------------------------------------------------------------
+--baseline              str       Run baseline instead of AdS model
+                                  Choices: mlp, spectral
+
+================================================================================
+FOLDER NAMING CONVENTION
+================================================================================
+
+Auto-generated experiment names follow this pattern:
+  ads_{dataset}_{path_type}_{geometry}[_options]
+
+Examples:
+  ads_checkerboard_hermite_flat
+  ads_checkerboard_hermite_flat_radial           # --use_radial_hermite
+  ads_checkerboard_hermite_flat_noweight         # --no-use_omega_weighting
+  ads_checkerboard_hermite_flat_radial_noweight  # both
+  ads_checkerboard_hermite_planar_hsv_p0.75      # HSV with p=0.75
+  ads_checkerboard_hermite_planar_hsv_p0.9_sig05-25  # HSV with custom sigma bounds
+  ads_checkerboard_hermite_planar_r010-200       # custom radial bounds
+
+================================================================================
