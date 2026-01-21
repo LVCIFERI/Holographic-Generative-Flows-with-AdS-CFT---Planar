@@ -147,24 +147,13 @@ class FullAdSBackbone(nn.Module):
     """
     Complete Klein-Gordon backbone in UV-stabilized variables.
 
-    Supports both standard AdS and Hyperscaling-Violating (HSV) geometries.
+    Document eq (uv-stable-ode):
+        ∂_r Φ̃^(i) = Π̃^(i)
+        ∂_r Π̃^(i) = -(d·f'/f - 2Δ_i)Π̃^(i) - (1/f²)Δ_ĝ Φ̃^(i) + dΔ_i(f'/f - 1)Φ̃^(i)
 
-    For standard AdS geometries:
-        Document eq (uv-stable-ode):
-            ∂_r Φ̃^(i) = Π̃^(i)
-            ∂_r Π̃^(i) = -(d·f'/f - 2Δ_i)Π̃^(i) - (1/f²)Δ_ĝ Φ̃^(i) + dΔ_i(f'/f - 1)Φ̃^(i)
-
-        For planar slicing (f'/f = 1):
-            ∂_r Φ̃ = Π̃
-            ∂_r Π̃ = -(d - 2Δ)Π̃ - (1/f²)Δ_ĝ Φ̃
-
-    For HSV geometries (paper Appendix A, Eqs A7-A8):
-        Field redefinition: Φ̃ = (pr)^{-dγ} Φ, where γ = p/(1-p)
-        
-            ∂_r Φ̃ = Π̃
-            ∂_r Π̃ = ((pr)^{2γ}|k|² + dγ/r²)Φ̃ - (dγ/r)Π̃
-
-        Note: (pr)^{2γ} = 1/f² is computed by the geometry.
+    For planar slicing (f'/f = 1):
+        ∂_r Φ̃ = Π̃
+        ∂_r Π̃ = -(d - 2Δ)Π̃ - (1/f²)Δ_ĝ Φ̃
 
     For point data (no spatial structure, Δ_ĝ = 0):
         ∂_r Φ̃ = Π̃
@@ -242,27 +231,28 @@ class FullAdSBackbone(nn.Module):
         # ∂_r Φ̃ = Π̃  (same for all geometries)
         dphi_dr = pi_tilde
 
-        # Check if this is an HSV geometry - use paper's equations (A7)-(A8)
+        # Check if this is an HSV geometry - use raw field equations  
         is_hsv = getattr(self.geometry, 'is_hsv', False)
         
         if is_hsv and hasattr(self.geometry, 'kg_gamma'):
             # =================================================================
-            # HSV Klein-Gordon equations from paper Appendix A, Eqs (A7)-(A8):
+            # HSV Klein-Gordon equations for RAW fields (code convention):
             #
-            #   dφ̃/dr = π̃
-            #   dπ̃/dr = ((pr)^{2γ}|k|² + dγ/r²)φ̃ - (dγ/r)π̃
+            #   dΦ/dr = Π
+            #   dΠ/dr = [(1-p)r]^{2γ}|k|²Φ + (dγ/r)Π
             #
-            # where γ = p/(1-p) in the code's convention.
-            # The field redefinition is Φ̃ = (pr)^{-dγ} Φ.
+            # where γ = p/(1-p), p=0 is flat, p→1 is AdS.
+            # These equations match the raw propagator from encoding (no UV stabilization).
             #
-            # Note: (pr)^{2γ} = 1/f² is already computed by geometry.f_inv2(r)
+            # Key difference from Appendix A: +dγ/r coefficient (was -dγ/r for Φ̃,Π̃)
+            # Note: [(1-p)r]^{2γ} = 1/f² is computed by geometry.f_inv2(r)
             # =================================================================
             
             gamma = self.geometry.kg_gamma
             
             # Handle flat space limit (γ = 0)
             if gamma == 0.0:
-                # Flat space: dπ̃/dr = |k|²φ̃ (no r-dependent terms)
+                # Flat space: dΠ/dr = |k|²Φ (no r-dependent terms)
                 dpi_dr = torch.zeros_like(pi_tilde)
                 if self.slice_op is not None:
                     lap_phi = self.slice_op.apply_minus_laplacian(phi_tilde)
@@ -281,14 +271,23 @@ class FullAdSBackbone(nn.Module):
             # Clamp r to avoid division by zero (r > 0 for HSV)
             r_safe = r_t.clamp(min=1e-8)
             
-            # Coefficients for HSV equations:
-            # π̃ coefficient: -dγ/r
-            # φ̃ coefficient: dγ/r²
-            one_over_r = 1.0 / r_safe
-            one_over_r_sq = one_over_r * one_over_r
+            # =================================================================
+            # RAW HSV Klein-Gordon equations (code convention: p=0 flat, p→1 AdS):
+            #
+            #   dΦ/dr = Π
+            #   dΠ/dr = [(1-p)r]^{2γ}|k|²Φ + (dγ/r)Π
+            #
+            # This matches the raw propagator from encoding (no UV stabilization).
+            # Note: +dγ/r coefficient (opposite sign from stabilized equations)
+            # =================================================================
             
-            pi_coeff = -d_gamma * one_over_r      # -dγ/r
-            phi_coeff = d_gamma * one_over_r_sq   # dγ/r²
+            # Coefficients for raw HSV equations:
+            # Π coefficient: +dγ/r  (driving term)
+            # Φ coefficient: 0 (no r⁻² term in raw equations)
+            one_over_r = 1.0 / r_safe
+            
+            pi_coeff = d_gamma * one_over_r       # +dγ/r (changed sign!)
+            phi_coeff = 0.0                      # No dγ/r² term for raw fields
             
             # Broadcast to match state shape
             ndim = phi_tilde.ndim
@@ -297,12 +296,11 @@ class FullAdSBackbone(nn.Module):
             elif r_safe.shape[0] == B and ndim > 1:
                 for _ in range(ndim - 1):
                     pi_coeff = pi_coeff.unsqueeze(-1)
-                    phi_coeff = phi_coeff.unsqueeze(-1)
             
-            # dπ̃/dr = -dγ/r · π̃ + dγ/r² · φ̃
-            dpi_dr = pi_coeff * pi_tilde + phi_coeff * phi_tilde
+            # dΠ/dr = +dγ/r · Π + 0 · Φ  (before Laplacian)
+            dpi_dr = pi_coeff * pi_tilde
             
-            # Add Laplacian term: (pr)^{2γ}|k|²φ̃ = f_inv_sq * (-Δ_ĝ)φ̃
+            # Add Laplacian term: [(1-p)r]^{2γ}|k|²Φ = f_inv_sq * (-Δ_ĝ)Φ
             if self.slice_op is not None:
                 f_inv_sq = self.geometry.f_inv2(r)
                 if not isinstance(f_inv_sq, Tensor):
@@ -327,7 +325,7 @@ class FullAdSBackbone(nn.Module):
         # Document eq (uv-stable-ode):
         #   ∂_r Π̃ = (2Δ - d·f'/f)Π̃ + dΔ(f'/f - 1)Φ̃ - (1/f²)Δ_ĝΦ̃
         # =================================================================
-        
+
         # Get geometry factors at radius r
         f_prime_over_f = self.geometry.log_f_prime(r)
         f_inv_sq = self.geometry.f_inv2(r)
