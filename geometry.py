@@ -929,6 +929,30 @@ class HyperscalingViolatingAdS(AdSGeometry):
         """This is a hyperscaling-violating geometry."""
         return True
 
+    @property
+    def kg_gamma(self) -> float:
+        """
+        Klein-Gordon equation exponent γ for UV-stabilized HSV variables.
+        
+        This is the γ appearing in the paper's Appendix A equations (A7)-(A8):
+            dφ̃/dr = π̃
+            dπ̃/dr = ((pr)^{2γ}|k|² + dγ/r²)φ̃ - (dγ/r)π̃
+        
+        where the field redefinition is Φ̃ = (pr)^{-dγ} Φ.
+        
+        In the paper's convention: γ = 1/p_paper - 1
+        In the code's inverted convention (p_code = 1 - p_paper):
+            γ = p_code / (1 - p_code)
+        
+        Returns:
+            γ for Klein-Gordon backbone equations
+        """
+        if self._use_ads:
+            return float('inf')  # AdS limit
+        if self._p == 0.0:
+            return 0.0  # Flat space: γ = 0
+        return self._p / self._one_minus_p
+
     def log_f(self, r: Tensor) -> Tensor:
         """
         Compute σ = log f(r) for stable HSV computations.
