@@ -448,6 +448,14 @@ class SpectralHolographicEncoder(nn.Module):
 
         # Bessel order: β = (1 + (d-1)p) / 2
         beta = (1.0 + (d - 1) * p) / 2.0
+        
+        # KG gamma for UV stabilization: γ = p/(1-p)
+        # This appears in the field redefinition Φ̃ = [(1-p)r]^{-dγ} Φ
+        if p < 1e-10:
+            kg_gamma = 0.0
+        else:
+            one_minus_p = 1.0 - p
+            kg_gamma = p / one_minus_p
 
         # Compute HSV coordinate u_uv from r_uv
         # u = [(1-p)r]^{1/(1-p)}
@@ -455,11 +463,25 @@ class SpectralHolographicEncoder(nn.Module):
         if p < 1e-10:
             u_uv = r_uv
             du_dr = 1.0
+            one_minus_p = 1.0
         else:
             one_minus_p = 1.0 - p
             u_uv = ((one_minus_p * r_uv) ** (1.0 / one_minus_p))
             # du/dr = u^p
             du_dr = u_uv ** p
+
+        # UV stabilization factor: [(1-p)·r_uv]^{-dγ}
+        # For p=0: stab_factor = 1 (no stabilization needed)
+        # This multiplies the raw propagator to give the UV-stabilized version
+        if p < 1e-10:
+            stab_factor = 1.0
+        else:
+            stab_factor = ((one_minus_p * r_uv) ** (-d * kg_gamma))
+        
+        # Coefficient for momentum correction: dγ/r_uv
+        # Appears in: Π̃ = [(1-p)r]^{-dγ} · [Π - (dγ/r)·Φ]
+        d_gamma = d * kg_gamma
+        pi_correction_coeff = d_gamma / r_uv if r_uv > 1e-10 else 0.0
 
         # Normalization constant: 2^{β-1} Γ(β)
         normalization = (2.0 ** (beta - 1.0)) * scipy_gamma(beta)
@@ -487,6 +509,7 @@ class SpectralHolographicEncoder(nn.Module):
         self.register_buffer("z_uv", torch.tensor(u_uv, dtype=torch.float32))  # Compatibility alias
         self.hsv_p = p
         self.hsv_beta = beta
+        self.hsv_kg_gamma = kg_gamma
 
         # Precompute Bessel-based envelopes for each channel
         envelopes_phi = []
@@ -500,36 +523,50 @@ class SpectralHolographicEncoder(nn.Module):
             # (unlike AdS where mass determines the conformal dimension)
             # We use the universal HSV kernel for all channels
 
-            # Phi envelope: K̂ = (|k|u)^β K_β(|k|u) / normalization
+            # Raw propagator: κ = (|k|u)^β K_β(|k|u) / normalization
             # Handle small argument carefully
             xi_safe = np.maximum(xi, 1e-10)
 
             # Compute K_β(ξ) using scipy
             K_beta_vals = scipy_kv(beta, xi_safe)
 
-            # (|k|u)^β · K_β(|k|u) / normalization
-            envelope_phi_np = (xi_safe ** beta) * K_beta_vals / normalization
+            # Raw propagator: (|k|u)^β · K_β(|k|u) / normalization
+            kappa_raw = (xi_safe ** beta) * K_beta_vals / normalization
 
             # Handle ξ → 0 limit: (ξ)^β K_β(ξ) → 2^{β-1} Γ(β) as ξ → 0
-            # So K̂ → 1 as ξ → 0 (correctly normalized)
-            envelope_phi_np = np.where(xi < 1e-10, 1.0, envelope_phi_np)
+            # So κ → 1 as ξ → 0 (correctly normalized)
+            kappa_raw = np.where(xi < 1e-10, 1.0, kappa_raw)
 
-            # Pi envelope: dK̂/dr = dK̂/du · du/dr
+            # Raw momentum: dκ/dr = dκ/du · du/dr
             # Using d/dx[x^β K_β(x)] = -x^β K_{β-1}(x):
-            # dK̂/du = -|k| · (|k|u)^β K_{β-1}(|k|u) / normalization
-            # dK̂/dr = -|k| · (|k|u)^β K_{β-1}(|k|u) · u^p / normalization
+            # dκ/du = -|k| · (|k|u)^β K_{β-1}(|k|u) / normalization
+            # dκ/dr = -|k| · (|k|u)^β K_{β-1}(|k|u) · du/dr / normalization
 
             # K_{β-1} (note: K_ν = K_{-ν}, so this works for β < 1 too)
             K_beta_minus_1_vals = scipy_kv(abs(beta - 1.0), xi_safe)
 
-            # -|k| · (|k|u)^β · K_{β-1}(|k|u) · u^p / normalization
-            envelope_pi_np = -k_mag_np * (xi_safe ** beta) * K_beta_minus_1_vals * du_dr / normalization
+            # dκ/dr = -|k| · (|k|u)^β · K_{β-1}(|k|u) · du/dr / normalization
+            dkappa_dr_raw = -k_mag_np * (xi_safe ** beta) * K_beta_minus_1_vals * du_dr / normalization
 
             # Handle ξ → 0 limit for momentum
-            # As ξ → 0: K_{β-1}(ξ) ~ (ξ/2)^{-(β-1)} Γ(β-1) / 2 for β > 1
-            # For β = 1/2 (p=0): K_{-1/2}(ξ) = K_{1/2}(ξ) = √(π/2ξ) e^{-ξ}
-            # The limit depends on β, but for normalization we set to 0 at k=0
-            envelope_pi_np = np.where(xi < 1e-10, 0.0, envelope_pi_np)
+            dkappa_dr_raw = np.where(xi < 1e-10, 0.0, dkappa_dr_raw)
+
+            # =================================================================
+            # Apply UV stabilization (code convention: p=0 flat, p→1 AdS)
+            #
+            # Field redefinition:
+            #   Φ̃ = [(1-p)r]^{-dγ} · Φ
+            #   Π̃ = [(1-p)r]^{-dγ} · [Π - (dγ/r)·Φ]
+            #
+            # For propagator at r_uv:
+            #   κ̃ = stab_factor · κ
+            #   π̃ = stab_factor · [dκ/dr - (dγ/r_uv)·κ]
+            #
+            # where stab_factor = [(1-p)·r_uv]^{-dγ}
+            # =================================================================
+            
+            envelope_phi_np = stab_factor * kappa_raw
+            envelope_pi_np = stab_factor * (dkappa_dr_raw - pi_correction_coeff * kappa_raw)
 
             # Normalize so zero-mode (k=0) has unit amplitude for phi
             norm_val = envelope_phi_np[0, 0]
@@ -546,12 +583,14 @@ class SpectralHolographicEncoder(nn.Module):
         # Print diagnostic info
         print(f"[SPECTRAL-HSV] Planar HSV propagator with p={p:.4f}")
         print(f"[SPECTRAL-HSV] Bessel order β = (1 + (d-1)p)/2 = {beta:.4f}")
+        print(f"[SPECTRAL-HSV] KG gamma γ = p/(1-p) = {kg_gamma:.4f}")
+        print(f"[SPECTRAL-HSV] UV stabilization factor = [(1-p)·r_uv]^{{-dγ}} = {stab_factor:.6f}")
         print(f"[SPECTRAL-HSV] HSV coordinate u_uv = {u_uv:.6f} (from r_uv = {r_uv:.4f})")
-        print(f"[SPECTRAL-HSV] Propagator: K̂ = (|k|u)^β K_β(|k|u) / (2^{{β-1}} Γ(β))")
+        print(f"[SPECTRAL-HSV] Propagator: κ̃ = [(1-p)r]^{{-dγ}} · (|k|u)^β K_β(|k|u) / (2^{{β-1}} Γ(β))")
         if p < 0.01:
-            print(f"[SPECTRAL-HSV] Near flat limit (p≈0): K̂ ≈ e^{{-|k|r}}")
+            print(f"[SPECTRAL-HSV] Near flat limit (p≈0): γ=0, no UV stabilization needed")
         elif p > 0.9:
-            print(f"[SPECTRAL-HSV] Near AdS limit (p≈1): K̂ ≈ (|k|z)^{{d/2}} K_{{d/2}}(|k|z)")
+            print(f"[SPECTRAL-HSV] Near AdS limit (p≈1): switches to AdS formulas at p≥0.95")
 
     def forward(self, points: Tensor) -> Tuple[Tensor, Tensor]:
         """
