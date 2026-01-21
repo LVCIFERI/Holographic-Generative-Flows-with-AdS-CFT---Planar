@@ -13,13 +13,13 @@
 #   - planar_hsv: HSV with R^d boundary (full p range)
 #
 # Usage:
-#   ./run_hsv_experiments.sh                          # Default: checkerboard, 80 epochs
+#   ./run_hsv_experiments.sh                          # Default: checkerboard, 100 epochs
 #   ./run_hsv_experiments.sh checkerboard 100         # Custom dataset and epochs
 #   ./run_hsv_experiments.sh gaussian_mixture 50      # Different dataset
 #
 # Arguments:
 #   dataset (optional) - Dataset name (default: checkerboard)
-#   epochs  (optional) - Number of epochs (default: 80)
+#   epochs  (optional) - Number of epochs (default: 100)
 #
 # =============================================================================
 
@@ -27,7 +27,7 @@ set -e
 
 # Parse arguments
 DATASET="${1:-checkerboard}"
-EPOCHS="${2:-80}"
+EPOCHS="${2:-100}"
 
 usage() {
     echo "HSV Geometry Experiments (Planar Only)"
@@ -36,10 +36,10 @@ usage() {
     echo ""
     echo "Arguments:"
     echo "  dataset (optional) - Dataset name (default: checkerboard)"
-    echo "  epochs  (optional) - Number of epochs (default: 80)"
+    echo "  epochs  (optional) - Number of epochs (default: 100)"
     echo ""
     echo "Examples:"
-    echo "  $0                           # Default: checkerboard, 80 epochs"
+    echo "  $0                           # Default: checkerboard, 100 epochs"
     echo "  $0 checkerboard 100          # 100 epochs on checkerboard"
     echo "  $0 gaussian_mixture 50       # 50 epochs on gaussian_mixture"
     echo ""
@@ -58,10 +58,10 @@ DEPTH=3
 BATCH_SIZE=64
 N_TRAIN=50000
 N_VIZ=10000
-SEEDS=(42 123 456)
+SEEDS=(42)
 
 # HSV p values covering the full range
-PLANAR_P_VALUES=(0.0 0.1 0.25 0.5 0.75 0.9 0.95)
+PLANAR_P_VALUES=(0.0 0.1 0.25 0.5 0.75 0.9)
 
 # Utility functions
 timestamp() {
