@@ -13,8 +13,8 @@ Key Concepts (Source-Based Encoding)
 ------------------------------------
 - Images are boundary SOURCES J(x, y), not fields directly
 - FFT gives the source spectral representation Ĵ(kx, ky)
-- Bulk field: φ̂(k) = K̂(r_UV, k) × Ĵ(k) (propagator times source)
-- Momentum: π̂(k) = ∂_r K̂(r_UV, k) × Ĵ(k)
+- Bulk field: φ̂(k) = K̂(r_UV, k) * Ĵ(k) (propagator times source)
+- Momentum: π̂(k) = ∂_r K̂(r_UV, k) * Ĵ(k)
 - Laplacian is diagonal: Δφ̂_k = -|k|²φ̂_k
 
 This is consistent with the AdS/CFT dictionary (Section 3 of the paper):
@@ -38,8 +38,8 @@ Supported Datasets
 Image Encoding Pipeline (Source-Based)
 --------------------------------------
 1. Image (source J) → FFT → Ĵ(k) source spectral coefficients
-2. Ĵ(k) × K̂(r_UV, k) → φ̂(k) field coefficients (propagator lift)
-3. Ĵ(k) × ∂_r K̂(r_UV, k) → π̂(k) momentum coefficients
+2. Ĵ(k) * K̂(r_UV, k) → φ̂(k) field coefficients (propagator lift)
+3. Ĵ(k) * ∂_r K̂(r_UV, k) → π̂(k) momentum coefficients
 4. Laplacian is diagonal: -Δφ̂ = |k|²φ̂
 5. Inverse: φ̂(k) / K̂(r_UV, k) → Ĵ(k) → IFFT → reconstructed image
 
@@ -486,8 +486,8 @@ class ImageSpectralEncoder(nn.Module):
     This encoder treats images as boundary SOURCES J(x), not fields directly.
     The bulk field φ is obtained by convolving with the bulk-boundary propagator K:
 
-        φ̂(k) = K̂(r_UV, k) × Ĵ(k)
-        π̂(k) = ∂_r K̂(r_UV, k) × Ĵ(k)
+        φ̂(k) = K̂(r_UV, k) * Ĵ(k)
+        π̂(k) = ∂_r K̂(r_UV, k) * Ĵ(k)
 
     where Ĵ(k) = FFT(image) is the source in Fourier space.
 
@@ -495,7 +495,7 @@ class ImageSpectralEncoder(nn.Module):
         Φ(r,x) = ∫ K(r,x;x') J(x') d^d x'
 
     For planar AdS, the UV-stabilized bulk-boundary propagator in Fourier space is:
-        K̃_Δ(r, k) = (2/Γ(ν)) e^{νr} (|k|/2)^ν K_ν(|k|e^{-r})
+        K̃_Δ(r, k) = (2/Γ(ν)) (e^{-r}|k|/2)^ν K_ν(|k|e^{-r})
 
     where ν = Δ - d/2 and K_ν is the modified Bessel function of the second kind.
 
@@ -607,10 +607,10 @@ class ImageSpectralEncoder(nn.Module):
         Compute the UV-stabilized bulk-boundary propagator envelopes.
 
         For planar AdS, the UV-stabilized propagator in Fourier space is:
-            K̃_Δ(r, k) = (2/Γ(ν)) e^{νr} (|k|/2)^ν K_ν(|k|e^{-r})
+            K̃_Δ(r, k) = (2/Γ(ν)) (e^{-r}|k|/2)^ν K_ν(|k|e^{-r})
 
         where ν = Δ - d/2, and the momentum envelope is:
-            ∂_r K̃_Δ = e^{νr} |k|^ν [2ν K_ν(ξ) + ξ K_{ν-1}(ξ)]
+            ∂_r K̃_Δ ~ ξ^{ν+1} K_{ν-1}(ξ)
 
         with ξ = |k|e^{-r} = |k|z where z is the Poincaré coordinate.
 
@@ -636,14 +636,12 @@ class ImageSpectralEncoder(nn.Module):
         K_nu = _bessel_k_nu(nu, xi, eps=regularization)
         K_nu_minus_1 = _bessel_k_nu(abs(nu - 1.0), xi, eps=regularization)
 
-        # UV-stabilized propagator: K̃ = e^{Δr} K
+        # UV-stabilized propagator: K̃ = e^{(d-Δ)r} K
         # Starting from κ_{|k|}(r) = (2/Γ(ν)) e^{-dr/2} (|k|/2)^ν K_ν(|k|e^{-r})
-        # Multiplying by e^{Δr} gives:
-        #   κ̃_{|k|}(r) = (2/Γ(ν)) e^{(Δ-d/2)r} (|k|/2)^ν K_ν(ξ)
-        #              = (2/Γ(ν)) e^{νr} (|k|/2)^ν K_ν(ξ)
-        prefactor = math.exp(nu * r_uv)
-        k_power = torch.pow(k_mag, nu)
-        envelope_phi_raw = prefactor * k_power * K_nu
+        # Multiplying by e^{(d-Δ)r} gives:
+        #   κ̃_{|k|}(r) = (2/Γ(ν)) (ξ/2)^ν K_ν(ξ)
+        xi_power = torch.pow(xi, nu)
+        envelope_phi_raw = xi_power * K_nu
 
         # Normalize so that envelope_phi[0, 0] = 1 (k=0 mode)
         norm_val = envelope_phi_raw[0, 0].item()
@@ -652,12 +650,10 @@ class ImageSpectralEncoder(nn.Module):
         else:
             envelope_phi = envelope_phi_raw
 
-        # Momentum envelope: Π̃ = e^{Δr}(Π + ΔΦ) = ∂_r Φ̃
-        # ∂_r[e^{νr} |k|^ν K_ν(ξ)] where ξ = |k|e^{-r}
-        # = e^{νr} |k|^ν [ν K_ν(ξ) + ξ K_{ν-1}(ξ)]
-        # Using the identity: d/dx[x^ν K_ν(x)] = -x^ν K_{ν-1}(x)
-        # and chain rule with ∂_r ξ = -ξ
-        envelope_pi_raw = prefactor * k_power * (xi * K_nu_minus_1 + 2.0 * nu * K_nu)
+        # Momentum envelope: Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ) = ∂_r Φ̃
+        # ∂_r[ξ^ν K_ν(ξ)] where ξ = |k|e^{-r}
+        # = ξ^{ν+1} K_{ν-1}(ξ)
+        envelope_pi_raw = xi_power * xi * K_nu_minus_1
 
         if abs(norm_val) > 1e-10:
             envelope_pi = envelope_pi_raw / norm_val
@@ -678,7 +674,7 @@ class ImageSpectralEncoder(nn.Module):
 
         The image is treated as a source J, and the field is obtained by
         multiplying by the propagator envelope:
-            φ̂(k) = K̂(r_UV, k) × Ĵ(k)
+            φ̂(k) = K̂(r_UV, k) * Ĵ(k)
 
         Args:
             images: (B, C, H, W) image tensor (source J)
@@ -714,8 +710,8 @@ class ImageSpectralEncoder(nn.Module):
 
         The image is treated as a source J, and field/momentum are obtained by
         multiplying by the respective propagator envelopes:
-            φ̂(k) = K̂(r_UV, k) × Ĵ(k)
-            π̂(k) = ∂_r K̂(r_UV, k) × Ĵ(k)
+            φ̂(k) = K̂(r_UV, k) * Ĵ(k)
+            π̂(k) = ∂_r K̂(r_UV, k) * Ĵ(k)
 
         This matches the point encoder physics exactly.
 
@@ -756,7 +752,7 @@ class ImageSpectralEncoder(nn.Module):
         """
         Decode field spectral coefficients back to images (sources).
 
-        Since encoding applied: φ̂ = K̂ × Ĵ
+        Since encoding applied: φ̂ = K̂ * Ĵ
         Decoding inverts: Ĵ = φ̂ / K̂ → IFFT → image
 
         Args:
@@ -800,7 +796,7 @@ class ImageSpectralLaplacian(nn.Module):
     """
     Laplacian operator for image spectral coefficients.
 
-    In Fourier space: Δφ̂(k) = -|k|² φ̂(k)
+    In Fourier space: Δφ̂(x) = -|k|² φ̂(k)
 
     This is diagonal - just multiply by -|k|²!
 
