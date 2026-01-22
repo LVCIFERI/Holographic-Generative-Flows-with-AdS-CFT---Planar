@@ -74,8 +74,8 @@ class BulkState:
     Document notation: S(r) = (Φ̃(r,·), Π̃(r,·))
 
     The UV-stabilized variables are defined as:
-        Φ̃ = e^{Δr} Φ
-        Π̃ = e^{Δr}(Π + ΔΦ)
+        Φ̃ = e^{(d-Δ)r} Φ
+        Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ)
 
     where Δ is the conformal dimension and r is the radial coordinate.
 
@@ -148,7 +148,7 @@ class BulkField(nn.Module):
         m_i² = Δ_i(Δ_i - d)
 
     Defines α_i = 2Δ_i - d for asymptotic expansions:
-        Φ ~ A e^{-Δr} + B e^{-(d-Δ)r}  as r → ∞
+        Φ ~ A e^{-Δr} + J e^{-(d-Δ)r}  as r → ∞
 
     Attributes
     ----------
@@ -240,8 +240,8 @@ class BulkField(nn.Module):
         Convert physical (Φ, Π) to UV-stabilized (Φ̃, Π̃).
 
         Document eq (uv-stable-def):
-            Φ̃ = e^{Δr} Φ
-            Π̃ = e^{Δr}(Π + ΔΦ)
+            Φ̃ = e^{(d-Δ)r} Φ
+            Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ)
 
         Args:
             phi: Physical field Φ, shape (B, C, ...)
@@ -253,10 +253,10 @@ class BulkField(nn.Module):
         """
         deltas = self._broadcast_deltas(phi)
         r_b = self._broadcast_r(r, phi.ndim)
-        exp_factor = torch.exp(deltas * r_b)
+        exp_factor = torch.exp((self.d - deltas) * r_b)
 
         phi_tilde = exp_factor * phi
-        pi_tilde = exp_factor * (pi + deltas * phi)
+        pi_tilde = exp_factor * (pi + (self.d - deltas) * phi)
 
         return BulkState(phi_tilde=phi_tilde, pi_tilde=pi_tilde)
 
@@ -265,8 +265,8 @@ class BulkField(nn.Module):
         Convert UV-stabilized (Φ̃, Π̃) back to physical (Φ, Π).
 
         Inverse of eq (uv-stable-def):
-            Φ = e^{-Δr} Φ̃
-            Π = e^{-Δr} Π̃ - Δ Φ
+            Φ = e^{-(d-Δ)r} Φ̃
+            Π = e^{-(d-Δ)r} Π̃ - (d-Δ) Φ
 
         Args:
             state: BulkState with stabilized variables
@@ -277,10 +277,10 @@ class BulkField(nn.Module):
         """
         deltas = self._broadcast_deltas(state.phi_tilde)
         r_b = self._broadcast_r(r, state.phi_tilde.ndim)
-        exp_neg = torch.exp(-deltas * r_b)
+        exp_neg = torch.exp(-(self.d - deltas) * r_b)
 
         phi = exp_neg * state.phi_tilde
-        pi = exp_neg * state.pi_tilde - deltas * phi
+        pi = exp_neg * state.pi_tilde - (self.d - deltas) * phi
 
         return phi, pi
 
@@ -1072,15 +1072,15 @@ class AdSBackbone(nn.Module):
 
     Document eq (uv-stable-ode):
         ∂_r Φ̃ = Π̃
-        ∂_r Π̃ = -(d·f'/f - 2Δ)Π̃ - (1/f²)Δ_ĝΦ̃ + dΔ(f'/f - 1)Φ̃
+        ∂_r Π̃ = -(d·f'/f - 2d + 2Δ)Π̃ - (1/f²)Δ_ĝΦ̃ + d(d-Δ)(f'/f - 1)Φ̃
 
     For planar slicing (f'/f = 1):
         ∂_r Φ̃ = Π̃
-        ∂_r Π̃ = -(d - 2Δ)Π̃ - (1/f²)Δ_ĝΦ̃
+        ∂_r Π̃ = -(2Δ - d)Π̃ - (1/f²)Δ_ĝΦ̃
 
     For point data (no spatial structure, Δ_ĝ = 0):
         ∂_r Φ̃ = Π̃
-        ∂_r Π̃ = (2Δ - d)Π̃
+        ∂_r Π̃ = -(2Δ - d)Π̃
 
     Attributes
     ----------
@@ -1167,11 +1167,11 @@ class AdSBackbone(nn.Module):
         # Coefficients
         d_fpf = self.d * f_prime_over_f
         two_delta_b = self.two_delta.view(1, -1, *([1] * (ndim - 2)))
-        pi_coeff = two_delta_b - d_fpf
+        pi_coeff = (2*self.d - two_delta_b) - d_fpf
 
         f_prime_minus_1 = f_prime_over_f - 1.0
         d_delta_b = self.d_delta.view(1, -1, *([1] * (ndim - 2)))
-        phi_coeff = d_delta_b * f_prime_minus_1
+        phi_coeff = (self.d**2 - d_delta_b) * f_prime_minus_1
 
         # ∂_r Φ̃ = Π̃
         dphi_dr = pi_tilde
@@ -1199,9 +1199,9 @@ class UVDictionaryLift(nn.Module):
     Lifts boundary data y to UV bulk state using the holographic dictionary.
 
     Document eq (lift-dict):
-        (A, B) = (E_src(y), E_vev(y))
-        Φ̃_UV = B + e^{(2Δ-d)r_UV} A
-        Π̃_UV = (2Δ-d) e^{(2Δ-d)r_UV} A + ξ
+        (J, A) = (E_src(y), E_vev(y))
+        Φ̃_UV = J + e^{-(2Δ-d)r_UV} A
+        Π̃_UV = -(2Δ-d) e^{-(2Δ-d)r_UV} A + ξ
 
     Document eq (lift-identity) special case (A≡0):
         Φ̃_UV = E(y)
@@ -1240,8 +1240,8 @@ class UVDictionaryLift(nn.Module):
             geometry: AdS geometry
             bulk_field: Bulk field specification
             disc: Discretization configuration
-            embed_src: Optional source embedding E_src (A coefficient)
-            embed_vev: Optional VEV embedding E_vev (B coefficient)
+            embed_src: Optional source embedding E_src (J coefficient)
+            embed_vev: Optional VEV embedding E_vev (A coefficient)
             noise_sigma: Standard deviation for momentum noise
         """
         super().__init__()
@@ -1275,27 +1275,27 @@ class UVDictionaryLift(nn.Module):
 
         # Compute coefficient embeddings
         if self.embed_vev is not None:
-            B_coeff = self.embed_vev(y)
-        else:
-            B_coeff = y
-
-        if self.embed_src is not None:
-            A_coeff = self.embed_src(y)
+            A_coeff = self.embed_vev(y)
         else:
             A_coeff = None
 
+        if self.embed_src is not None:
+            J_coeff = self.embed_src(y)
+        else:
+            J_coeff = y
+
         # Build Φ̃_UV
         if A_coeff is not None:
-            # Full dictionary: Φ̃ = B + e^{α r} A where α = 2Δ - d
-            alpha = self.bulk_field.alpha.view(1, -1, *([1] * (B_coeff.ndim - 2)))
-            exp_factor = torch.exp(alpha * r_uv)
-            phi_tilde = B_coeff + exp_factor * A_coeff
+            # Full dictionary: Φ̃ = J + e^{-α r} A where α = 2Δ - d
+            alpha = self.bulk_field.alpha.view(1, -1, *([1] * (A_coeff.ndim - 2)))
+            exp_factor = torch.exp(-alpha * r_uv)
+            phi_tilde = J_coeff + exp_factor * A_coeff
 
-            # Π̃ = α e^{α r} A + ξ
-            pi_deterministic = alpha * exp_factor * A_coeff
+            # Π̃ = -α e^{-α r} A + ξ
+            pi_deterministic = -alpha * exp_factor * A_coeff
         else:
             # Minimal lift: Φ̃ = E(y), Π̃ = ξ
-            phi_tilde = B_coeff
+            phi_tilde = J_coeff
             pi_deterministic = torch.zeros_like(phi_tilde)
 
         # Sample noise ξ
@@ -1425,12 +1425,12 @@ class UVReadout(nn.Module):
 
 class UVCoefficientOperator(nn.Module):
     """
-    Extract (A, B) coefficients from UV slices.
+    Extract (J, A) coefficients from UV slices.
 
     Fits the asymptotic expansion:
-        Φ̃(r, x) ≈ B(x) + A(x) e^{(2Δ-d)r}
+        Φ̃(r, x) ≈ J(x) + A(x) e^{-(2Δ-d)r}
 
-    to extract the source (A) and VEV (B) coefficients.
+    to extract the source (J) and VEV (A) coefficients.
 
     Attributes
     ----------
@@ -2051,17 +2051,18 @@ def bulk_to_canonical(
     delta: Tensor,
     omega: Tensor,
     geometry=None,
+    d=2
 ) -> CanonicalState:
     """
     Convert from UV-stabilized (Φ̃, Π̃) to canonical (Φ, P).
     
     The UV-stabilization relations are geometry-dependent:
-        Φ̃ = f(r)^Δ Φ           →  Φ = f(r)^{-Δ} Φ̃
-        Π̃ = f(r)^Δ (Π + Δ(f'/f)Φ)  →  Π = f(r)^{-Δ} Π̃ - Δ(f'/f)Φ
+        Φ̃ = f(r)^(d-Δ) Φ           →  Φ = f(r)^{-(d-Δ)} Φ̃
+        Π̃ = f(r)^(d-Δ) (Π + (d-Δ)(f'/f)Φ)  →  Π = f(r)^{-(d-Δ)} Π̃ - (d-Δ)(f'/f)Φ
         P = ω(r) Π
     
-    For standard AdS: f(r) = e^r, so f^Δ = e^{Δr} and f'/f = 1.
-    For HSV: f(r) = [(1-p)r]^{-p/(1-p)}, with geometry-specific f'/f.
+    For standard AdS: f(r) = e^r, so f^(d-Δ) = e^{(d-Δ)r} and f'/f = 1.
+    For HSV: f(r) = (p*r)^{-(1-p)/p}, with geometry-specific f'/f.
     
     Args:
         state: UV-stabilized state (Φ̃, Π̃)
@@ -2099,7 +2100,7 @@ def bulk_to_canonical(
     
     # Compute geometry-dependent factors
     if geometry is not None and getattr(geometry, 'is_hsv', False):
-        # HSV geometry: use f(r)^{-Δ} and f'/f from geometry
+        # HSV geometry: use f(r)^{-(d-Δ)} and f'/f from geometry
         f_val = geometry.f(r_scalar)
         if not isinstance(f_val, Tensor):
             f_val = torch.tensor(f_val, device=device, dtype=dtype)
@@ -2113,25 +2114,25 @@ def bulk_to_canonical(
         while f_prime_over_f.ndim < state.phi_tilde.ndim:
             f_prime_over_f = f_prime_over_f.unsqueeze(-1)
         
-        # f^{-Δ} = 1 / f^Δ
+        # f^{-(d-Δ)} = 1 / f^(d-Δ)
         f_safe = torch.clamp(f_val.abs(), min=1e-10)
-        inv_stab_factor = f_safe ** (-delta)
+        inv_stab_factor = f_safe ** (-(d - delta))
         
-        # Φ = f^{-Δ} Φ̃
+        # Φ = f^{-(d-Δ)} Φ̃
         phi = inv_stab_factor * state.phi_tilde
         
-        # Π = f^{-Δ} Π̃ - Δ(f'/f)Φ
-        pi = inv_stab_factor * state.pi_tilde - delta * f_prime_over_f * phi
+        # Π = f^{-(d-Δ)} Π̃ - (d-Δ)(f'/f)Φ
+        pi = inv_stab_factor * state.pi_tilde - (d - delta) * f_prime_over_f * phi
     else:
         # Standard AdS: f(r) = e^r, f'/f = 1
-        # f^{-Δ} = e^{-Δr}
-        inv_stab_factor = torch.exp(-delta * r)
+        # f^{-(d-Δ)} = e^{-(d-Δ)r}
+        inv_stab_factor = torch.exp(-(d - delta) * r)
         
-        # Φ = e^{-Δr} Φ̃
+        # Φ = e^{-(d - Δ)r} Φ̃
         phi = inv_stab_factor * state.phi_tilde
         
-        # Π = e^{-Δr} Π̃ - Δ·Φ  (since f'/f = 1 for AdS)
-        pi = inv_stab_factor * state.pi_tilde - delta * phi
+        # Π = e^{-(d-Δ)r} Π̃ - (d-Δ)·Φ  (since f'/f = 1 for AdS)
+        pi = inv_stab_factor * state.pi_tilde - (d - delta) * phi
     
     # P = ω Π
     P = omega * pi
@@ -2145,17 +2146,18 @@ def canonical_to_bulk(
     delta: Tensor,
     omega: Tensor,
     geometry=None,
+    d=2
 ) -> BulkState:
     """
     Convert from canonical (Φ, P) to UV-stabilized (Φ̃, Π̃).
     
     The UV-stabilization relations are geometry-dependent:
         Π = P / ω(r)
-        Φ̃ = f(r)^Δ Φ
-        Π̃ = f(r)^Δ (Π + Δ(f'/f)Φ)
+        Φ̃ = f(r)^(d-Δ) Φ
+        Π̃ = f(r)^(d-Δ) (Π + (d-Δ)(f'/f)Φ)
     
-    For standard AdS: f(r) = e^r, so f^Δ = e^{Δr} and f'/f = 1.
-    For HSV: f(r) = [(1-p)r]^{-p/(1-p)}, with geometry-specific f'/f.
+    For standard AdS: f(r) = e^r, so f^(d-Δ) = e^{(d-Δ)r} and f'/f = 1.
+    For HSV: f(r) = (p*r)^{-(1-p)/p}, with geometry-specific f'/f.
     
     Args:
         state: Canonical state (Φ, P)
@@ -2197,7 +2199,7 @@ def canonical_to_bulk(
     
     # Compute geometry-dependent factors
     if geometry is not None and getattr(geometry, 'is_hsv', False):
-        # HSV geometry: use f(r)^Δ and f'/f from geometry
+        # HSV geometry: use f(r)^(d-Δ) and f'/f from geometry
         f_val = geometry.f(r_scalar)
         if not isinstance(f_val, Tensor):
             f_val = torch.tensor(f_val, device=device, dtype=dtype)
@@ -2211,25 +2213,25 @@ def canonical_to_bulk(
         while f_prime_over_f.ndim < state.phi.ndim:
             f_prime_over_f = f_prime_over_f.unsqueeze(-1)
         
-        # f^Δ
+        # f^(d-Δ)
         f_safe = torch.clamp(f_val.abs(), min=1e-10)
-        stab_factor = f_safe ** delta
+        stab_factor = f_safe ** (d - delta)
         
-        # Φ̃ = f^Δ Φ
+        # Φ̃ = f^(d-Δ) Φ
         phi_tilde = stab_factor * state.phi
         
-        # Π̃ = f^Δ (Π + Δ(f'/f)Φ)
-        pi_tilde = stab_factor * (pi + delta * f_prime_over_f * state.phi)
+        # Π̃ = f^(d-Δ) (Π + (d-Δ)(f'/f)Φ)
+        pi_tilde = stab_factor * (pi + (d - delta) * f_prime_over_f * state.phi)
     else:
         # Standard AdS: f(r) = e^r, f'/f = 1
-        # f^Δ = e^{Δr}
-        stab_factor = torch.exp(delta * r)
+        # f^(d-Δ) = e^{(d-Δ)r}
+        stab_factor = torch.exp((d - delta) * r)
         
-        # Φ̃ = e^{Δr} Φ
+        # Φ̃ = e^{(d-Δ)r} Φ
         phi_tilde = stab_factor * state.phi
         
-        # Π̃ = e^{Δr}(Π + Δ·Φ)  (since f'/f = 1 for AdS)
-        pi_tilde = stab_factor * (pi + delta * state.phi)
+        # Π̃ = e^{(d-Δ)r}(Π + (d-Δ)·Φ)  (since f'/f = 1 for AdS)
+        pi_tilde = stab_factor * (pi + (d - delta) * state.phi)
     
     return BulkState(phi_tilde=phi_tilde, pi_tilde=pi_tilde)
 
