@@ -243,11 +243,11 @@ def validate_config(config: ExperimentConfig) -> Tuple[bool, List[str]]:
     if "hsv" in config.slice_geometry.lower():
         p = config.hsv_p
         
-        # General HSV constraint: p ∈ [0, 1)
-        if p < 0 or p >= 1:
+        # General HSV constraint: p ∈ (0, 1]
+        if p <= 0 or p > 1:
             errors.append(
                 f"HSV parameter p = {p} out of valid range [0, 1). "
-                f"Use --hsv_p with 0 ≤ p < 1."
+                f"Use --hsv_p with 0 < p ≤ 1."
             )
     
     # 2. Symplectic solver requirements
@@ -770,18 +770,18 @@ def create_model(
     hsv_geometries = ["planar_hsv"]
     if config.slice_geometry in hsv_geometries and config.hsv_p > 0:
         # =================================================================
-        # HSV U-BOUNDS: Stable training for ALL p ∈ [0, 1)
+        # HSV U-BOUNDS: Stable training for ALL p ∈ (0, 1]
         # =================================================================
-        # The HSV coordinate u = [(1-p)r]^{1/(1-p)} is natural:
+        # The HSV coordinate u = (pr)^{1/p} is natural:
         #   - Appears directly in propagator K̂(u,k) = (|k|u)^β K_β(|k|u)
-        #   - p=0: u = r (flat), p→1: u = e^{-r} = z (AdS)
-        #   - r = u^{1-p} / (1-p), so r > 0 always when u > 0
+        #   - p = 1: u = r (flat), p → 0: u = e^{-r} = z (AdS)
+        #   - r = u^p / p, so r > 0 always when u > 0
         #
         # This ensures r_ir stays safely away from singularity for ALL p.
         # =================================================================
         use_u_bounds = (
             config.hsv_use_u_bounds 
-            and config.hsv_p < config.hsv_ads_threshold
+            and config.hsv_p > config.hsv_ads_threshold
         )
         
         if use_u_bounds:
@@ -796,8 +796,8 @@ def create_model(
             print(f"[HSV] Bessel argument range: |k|u ∈ [|k|×{config.hsv_u_uv}, |k|×{config.hsv_u_ir}]")
         else:
             # Legacy behavior or AdS limit: use fixed r bounds with safety check
-            if config.hsv_p >= config.hsv_ads_threshold:
-                print(f"[HSV] p={config.hsv_p} >= threshold={config.hsv_ads_threshold}, using AdS formulas")
+            if config.hsv_p <= config.hsv_ads_threshold:
+                print(f"[HSV] p={config.hsv_p} <= threshold={config.hsv_ads_threshold}, using AdS formulas")
             min_safe_r_ir = 0.1  # Safe minimum to avoid r=0 singularity
             if r_ir < min_safe_r_ir:
                 print(f"[WARNING] {config.slice_geometry} geometry (p={config.hsv_p}) has singularity at r=0")
@@ -1551,9 +1551,9 @@ def parse_args() -> argparse.Namespace:
         help="Slice geometry type"
     )
     parser.add_argument("--hsv_p", type=float, default=None, 
-        help="HSV parameter p ∈ [0,1): p=0 flat, p→1 AdS")
+        help="HSV parameter p ∈ (0,1]: p = 1 flat, p → 0 AdS")
     parser.add_argument("--hsv_ads_threshold", type=float, default=None,
-        help="Threshold for switching to AdS formulas (default: 0.95)")
+        help="Threshold for switching to AdS formulas (default: 0.05)")
     parser.add_argument("--hsv_propagator_mode", type=str, default=None,
         choices=["bessel"],
         help="HSV propagator mode: 'bessel' (closed-form conformal product)")
