@@ -241,12 +241,12 @@ class GeometryConfig:
     r_min: float = 0.0
     r_max: float = 8.0
     # Hyperscaling-violating parameter p ∈ [0, 1)
-    # p = 0: flat space (f = 1)
-    # p → 1: AdS limit (f = e^r)
+    # p = 1: flat space (f = 1)
+    # p → 0: AdS limit (f = e^r)
     # Intermediate: f(r) = [(1-p)r]^(-p/(1-p))
     hsv_p: float = 0.5
-    # Threshold for switching to exact AdS formulas near p = 1
-    hsv_ads_threshold: float = 0.95
+    # Threshold for switching to exact AdS formulas near p = 0
+    hsv_ads_threshold: float = 0.05
     # Propagator mode: "bessel" for closed-form conformal product, "emd" for full ODE
     hsv_propagator_mode: str = "bessel"
 
@@ -840,19 +840,19 @@ class ExperimentConfig:
     # Geometry (Document Section 2)
     d: Optional[int] = None
     slice_geometry: str = "planar"
-    # Hyperscaling-violating parameter p ∈ [0, 1)
-    # p = 0: flat, p → 1: AdS limit
+    # Hyperscaling-violating parameter p ∈ (0, 1]
+    # p = 1: flat, p → 0: AdS limit
     hsv_p: float = 0.5
-    hsv_ads_threshold: float = 0.95
+    hsv_ads_threshold: float = 0.05
     # Propagator mode: "bessel" for closed-form conformal product, "emd" for full ODE
     hsv_propagator_mode: str = "bessel"
     
-    # HSV u-bounds: stable training for ALL p ∈ [0, 1)
-    # The HSV coordinate u = [(1-p)r]^{1/(1-p)} is the natural variable:
+    # HSV u-bounds: stable training for ALL p ∈ (0, 1]
+    # The HSV coordinate u = (p*r)^{1/p} is the natural variable:
     #   - Appears directly in propagator: K̂(u,k) = (|k|u)^β K_β(|k|u)
-    #   - p=0: u = r (flat), p→1: u = e^{-r} = z (AdS)
+    #   - p = 1: u = r (flat), p → 0: u = e^{-r} = z (AdS)
     # Fixing u-bounds ensures r_ir stays away from r=0 singularity for ALL p.
-    # r = u^{1-p} / (1-p), so r_ir > 0 always when u_uv > 0.
+    # r = u^{p} / p, so r_ir > 0 always when u_uv > 0.
     hsv_use_u_bounds: bool = True
     hsv_u_uv: float = 0.1   # UV boundary (small u, near boundary)
     hsv_u_ir: float = 1.0   # IR boundary (large u, deep bulk)
