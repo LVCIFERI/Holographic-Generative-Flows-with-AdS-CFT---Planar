@@ -11,17 +11,17 @@ Following paper Section 3.3 (Spectral representation of data), the key insight
 is that the bulk-boundary propagator determines how boundary sources create
 bulk fields. In Fourier space (paper eq. 22):
 
-    κ̃_{|k|}(r) = (2/Γ(ν)) (|k|e^r/2)^ν K_ν(|k|e^{-r})
+    κ̃_{|k|}(r) = (2/Γ(ν)) (|k|e^{-r}/2)^ν K_ν(|k|e^{-r})
 
 where ν = Δ - d/2 and K_ν is the modified Bessel function of the second kind.
 
 Spectral Point Encoding (Paper Section 3.3)
 -------------------------------------------
 Data points x_* are encoded as delta-function sources:
-    J(x|x_*) = N_ν δ(x - x_*)
+    J(x|x_*) = δ(x - x_*)
 
 The Fourier mode coefficients become:
-    φ̃_k(r|x_*) = (N_ν / (2π)^{d/2}) κ̃_{|k|}(r) e^{ik·x_*}
+    φ̃_k(r|x_*) = (1 / (2π)^{d/2}) κ̃_{|k|}(r) e^{ik·x_*}
 
 The phase e^{ik·x_*} encodes the position via the Fourier shift theorem.
 
@@ -95,7 +95,7 @@ class SpectralHolographicEncoder(nn.Module):
     Geometry-aware spectral holographic encoding for AdS/CFT bulk-boundary propagator.
 
     Supports slice geometries:
-    - PLANAR: Fourier basis with Bessel-based propagator K̂_Δ(z, k) ∝ |k|^ν K_ν(|k|z)
+    - PLANAR: Fourier basis with Bessel-based propagator K̂_Δ(z, k) ∝ (|k|z)^ν K_ν(|k|z)
     - FLAT: Flat Euclidean propagator (ablation baseline)
     - HYPERSCALING_VIOLATING: HSV propagator with p-dependent scaling
 
@@ -262,15 +262,14 @@ class SpectralHolographicEncoder(nn.Module):
             xi = k_mag * z_uv
             K_nu = _bessel_k_nu(nu, xi, eps=regularization)
 
-            # UV-stabilized propagator: K̃ = e^{Δr} K
+            # UV-stabilized propagator: K̃ = e^{(d-Δ)r} K
             # Starting from κ_{|k|}(r) = (2/Γ(ν)) e^{-dr/2} (|k|/2)^ν K_ν(|k|e^{-r})
-            # Multiplying by e^{Δr} gives:
-            #   κ̃_{|k|}(r) = (2/Γ(ν)) e^{(Δ-d/2)r} (|k|/2)^ν K_ν(ξ)
-            #              = (2/Γ(ν)) e^{νr} (|k|/2)^ν K_ν(ξ)
+            # Multiplying by e^{(d-Δ)r} gives:
+            #   κ̃_{|k|}(r) = (2/Γ(ν)) e^{-(Δ-d/2)r} (|k|/2)^ν K_ν(ξ)
+            #              = (2/Γ(ν)) (ξ/2)^ν K_ν(ξ)
             # where ν = Δ - d/2 and ξ = |k|e^{-r}
-            prefactor = math.exp(nu * r_uv)
-            k_power = torch.pow(k_mag, nu)
-            envelope_phi_raw = prefactor * k_power * K_nu
+            xi_power = torch.pow(xi, nu)
+            envelope_phi_raw = xi_power * K_nu
 
             norm_val = envelope_phi_raw[0, 0].item()
             if abs(norm_val) > 1e-10:
@@ -278,13 +277,10 @@ class SpectralHolographicEncoder(nn.Module):
             else:
                 envelope_phi = envelope_phi_raw
 
-            # Momentum envelope: Π̃ = e^{Δr}(Π + ΔΦ) = ∂_r Φ̃
-            # ∂_r[e^{νr} |k|^ν K_ν(ξ)] = e^{νr} |k|^ν [ν K_ν(ξ) + ξ K_{ν-1}(ξ) · (+1)]
-            #                          = e^{νr} |k|^ν [ν K_ν(ξ) - ξ K'_ν(ξ)]
-            # Using K'_ν(ξ) = -K_{ν-1}(ξ) - (ν/ξ)K_ν(ξ), we get:
-            #   ∂_r Φ̃ = e^{νr} |k|^ν [2ν K_ν(ξ) + ξ K_{ν-1}(ξ)]
+            # Momentum envelope: Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ) = ∂_r Φ̃
+            # ∂_r[ξ^ν K_ν(ξ)] = ξ^{ν+1} K_{ν-1}(ξ)
             K_nu_minus_1 = _bessel_k_nu(abs(nu - 1.0), xi, eps=regularization)
-            envelope_pi_raw = prefactor * k_power * (xi * K_nu_minus_1 + 2.0 * nu * K_nu)
+            envelope_pi_raw = xi_power * xi * K_nu_minus_1
 
             if abs(norm_val) > 1e-10:
                 envelope_pi = envelope_pi_raw / norm_val
@@ -406,21 +402,21 @@ class SpectralHolographicEncoder(nn.Module):
             K̂(u, k) = (|k|u)^β K_β(|k|u) / (2^{β-1} Γ(β))
 
         where:
-            β = (1 + (d-1)p) / 2      (Bessel order)
-            u = [(1-p)r]^{1/(1-p)}    (HSV radial coordinate)
+            β = (1 + (d-1)(1-p)) / 2      (Bessel order)
+            u = [p*r]^{1/p}    (HSV radial coordinate)
 
         This formula unifies flat space and AdS limits:
-            p = 0:  β = 1/2, u = r     →  K̂ = e^{-|k|r}           (flat)
-            p → 1:  β → d/2, u → z     →  K̂ ∝ (|k|z)^{d/2} K_{d/2}  (AdS)
+            p = 1:  β = 1/2, u = r     →  K̂ = e^{-|k|r}           (flat)
+            p → 0:  β → d/2, u → z     →  K̂ ∝ (|k|z)^{d/2} K_{d/2}  (AdS)
 
-        For p >= 0.95 (near AdS), the HSV coordinate u becomes numerically
+        For p <= 0.05 (near AdS), the HSV coordinate u becomes numerically
         unstable, so we fall back to the standard AdS Bessel propagator.
 
         The momentum propagator uses the Bessel identity:
             d/dx [x^β K_β(x)] = -x^β K_{β-1}(x)
 
         So:
-            dK̂/dr = -|k| · (|k|u)^β K_{β-1}(|k|u) · u^p / normalization
+            dK̂/dr = -|k| · (|k|u)^β K_{β-1}(|k|u) · u^(1-p) / normalization
 
         References:
             - Hyperscaling-violating holography (Dong et al., arXiv:1201.1905)
@@ -433,12 +429,12 @@ class SpectralHolographicEncoder(nn.Module):
         p = hsv_p if hsv_p is not None else 0.0
         
         # Threshold for switching to AdS formulas (numerical stability)
-        HSV_ADS_THRESHOLD = 0.95
+        HSV_ADS_THRESHOLD = 0.05
         
-        # For p >= threshold, the HSV coordinate u = [(1-p)r]^{1/(1-p)} becomes
+        # For p <= threshold, the HSV coordinate u = [p*r]^{1/p} becomes
         # numerically unstable (approaches 0 extremely fast). Fall back to AdS.
-        if p >= HSV_ADS_THRESHOLD:
-            print(f"[SPECTRAL-HSV] p={p:.4f} >= {HSV_ADS_THRESHOLD}, using AdS Bessel propagator")
+        if p <= HSV_ADS_THRESHOLD:
+            print(f"[SPECTRAL-HSV] p={p:.4f} <= {HSV_ADS_THRESHOLD}, using AdS Bessel propagator")
             # Compute nus for AdS Bessel (ν = Δ - d/2)
             nus = deltas_t - d / 2.0
             self._init_planar(n_modes, Lx, Ly, r_uv, regularization, deltas_t, nus)
@@ -446,20 +442,19 @@ class SpectralHolographicEncoder(nn.Module):
             self.hsv_beta = d / 2.0  # AdS limit
             return
 
-        # Bessel order: β = (1 + (d-1)p) / 2
-        beta = (1.0 + (d - 1) * p) / 2.0
+        # Bessel order: β = (1 + (d-1)(1-p)) / 2
+        beta = (1.0 + (d - 1) * (1-p)) / 2.0
 
         # Compute HSV coordinate u_uv from r_uv
-        # u = [(1-p)r]^{1/(1-p)}
-        # Special case p ≈ 0: u = r (limit is well-defined)
-        if p < 1e-10:
+        # u = [p*r]^{1/p}
+        # Special case p ≈ 1: u = r (limit is well-defined)
+        if 1-p < 1e-10:
             u_uv = r_uv
             du_dr = 1.0
         else:
-            one_minus_p = 1.0 - p
-            u_uv = ((one_minus_p * r_uv) ** (1.0 / one_minus_p))
+            u_uv = (p * r_uv) ** (1.0 / p)
             # du/dr = u^p
-            du_dr = u_uv ** p
+            du_dr = u_uv ** (1-p)
 
         # Normalization constant: 2^{β-1} Γ(β)
         normalization = (2.0 ** (beta - 1.0)) * scipy_gamma(beta)
@@ -517,17 +512,17 @@ class SpectralHolographicEncoder(nn.Module):
             # Pi envelope: dK̂/dr = dK̂/du · du/dr
             # Using d/dx[x^β K_β(x)] = -x^β K_{β-1}(x):
             # dK̂/du = -|k| · (|k|u)^β K_{β-1}(|k|u) / normalization
-            # dK̂/dr = -|k| · (|k|u)^β K_{β-1}(|k|u) · u^p / normalization
+            # dK̂/dr = -|k| · (|k|u)^β K_{β-1}(|k|u) · u^(1-p) / normalization
 
             # K_{β-1} (note: K_ν = K_{-ν}, so this works for β < 1 too)
             K_beta_minus_1_vals = scipy_kv(abs(beta - 1.0), xi_safe)
 
-            # -|k| · (|k|u)^β · K_{β-1}(|k|u) · u^p / normalization
+            # -|k| · (|k|u)^β · K_{β-1}(|k|u) · u^(1-p) / normalization
             envelope_pi_np = -k_mag_np * (xi_safe ** beta) * K_beta_minus_1_vals * du_dr / normalization
 
             # Handle ξ → 0 limit for momentum
             # As ξ → 0: K_{β-1}(ξ) ~ (ξ/2)^{-(β-1)} Γ(β-1) / 2 for β > 1
-            # For β = 1/2 (p=0): K_{-1/2}(ξ) = K_{1/2}(ξ) = √(π/2ξ) e^{-ξ}
+            # For β = 1/2 (p=1): K_{-1/2}(ξ) = K_{1/2}(ξ) = √(π/2ξ) e^{-ξ}
             # The limit depends on β, but for normalization we set to 0 at k=0
             envelope_pi_np = np.where(xi < 1e-10, 0.0, envelope_pi_np)
 
@@ -545,13 +540,13 @@ class SpectralHolographicEncoder(nn.Module):
 
         # Print diagnostic info
         print(f"[SPECTRAL-HSV] Planar HSV propagator with p={p:.4f}")
-        print(f"[SPECTRAL-HSV] Bessel order β = (1 + (d-1)p)/2 = {beta:.4f}")
+        print(f"[SPECTRAL-HSV] Bessel order β = (1 + (d-1)(1-p))/2 = {beta:.4f}")
         print(f"[SPECTRAL-HSV] HSV coordinate u_uv = {u_uv:.6f} (from r_uv = {r_uv:.4f})")
         print(f"[SPECTRAL-HSV] Propagator: K̂ = (|k|u)^β K_β(|k|u) / (2^{{β-1}} Γ(β))")
-        if p < 0.01:
-            print(f"[SPECTRAL-HSV] Near flat limit (p≈0): K̂ ≈ e^{{-|k|r}}")
-        elif p > 0.9:
-            print(f"[SPECTRAL-HSV] Near AdS limit (p≈1): K̂ ≈ (|k|z)^{{d/2}} K_{{d/2}}(|k|z)")
+        if 1-p < 0.01:
+            print(f"[SPECTRAL-HSV] Near flat limit (p≈1): K̂ ≈ e^{{-|k|r}}")
+        elif 1-p > 0.9:
+            print(f"[SPECTRAL-HSV] Near AdS limit (p≈0): K̂ ≈ (|k|z)^{{d/2}} K_{{d/2}}(|k|z)")
 
     def forward(self, points: Tensor) -> Tuple[Tensor, Tensor]:
         """
@@ -1541,11 +1536,13 @@ class HolographicPointEncoder(nn.Module):
 
         # Precompute scale factors for pi_tilde
         # At UV, the propagator derivative w.r.t. r gives the momentum
-        # Π̃ ~ 2Δ z² / (z² + ε)^{Δ+1} * C_Δ
+        # Π̃ ~ (z²)^{nu}*(d(z² + ε) - 2Δε) / (z² + ε)^{Δ+1} * C_Δ
         # We use this to scale the momentum relative to the field
+        nus_t = deltas_t - self.d/2
         denom = z_sq_uv + regularization
-        pi_scale = 2.0 * deltas_t * z_sq_uv * C_delta / (denom ** (deltas_t + 1.0))
-        phi_scale = C_delta / (denom ** deltas_t)
+        numerator = (z_sq_uv**nus_t) * (self.d * (z_sq_uv + regularization) - 2*deltas_t*regularization)
+        pi_scale = numerator * C_delta / (denom ** (deltas_t + 1.0))
+        phi_scale = (z_sq_uv**nus_t) * C_delta / (denom ** deltas_t)
         # Ratio gives us how to scale pi relative to phi
         self.register_buffer("pi_to_phi_ratio", pi_scale / (phi_scale + 1e-10))
 
@@ -1730,11 +1727,11 @@ class HolographicPointFieldEncoder(nn.Module):
         - C_Δ = Γ(Δ) / (π^{d/2} Γ(Δ - d/2)) is the normalization
         - Δ is the conformal dimension
 
-    In UV-stabilized variables (Φ̃ = e^{Δr} Φ):
-        K̃_Δ(r, x; x') = C_Δ / (e^{-2r} + |x - x'|²)^Δ
+    In UV-stabilized variables (Φ̃ = e^{(d-Δ)r} Φ):
+        K̃_Δ(r, x; x') = C_Δ*e^{(d-2Δ)r} / (e^{-2r} + |x - x'|²)^Δ
 
     The momentum Π̃ is computed analytically:
-        Π̃ = 2Δ e^{-2r} C_Δ / (e^{-2r} + |x - x'|²)^{Δ+1}
+        Π̃ = e^{(d-2Δ)r} * (d(e^{-2r} + |x-x'|^2) - 2Δ|x-x'|^2) * C_Δ / (e^{-2r} + |x - x'|²)^{Δ+1}
 
     Key properties:
     - At UV (r→∞): K̃ becomes peaked at source → recovers point data
@@ -1914,14 +1911,17 @@ class HolographicPointFieldEncoder(nn.Module):
             delta = deltas[c]
             C = C_delta[c]
             norm = norm_factors[c]
+            nu = delta - self.d/2
+            exp_factor = z_sq**nu
 
-            # K̃_Δ = C_Δ / (e^{-2r} + ρ²)^Δ
-            K_tilde = norm * C / (denom ** delta)  # (B, H, W)
+            # K̃_Δ = C_Δ*e^{(d-2Δ)r} / (e^{-2r} + ρ²)^Δ
+            K_tilde = norm * C * exp_factor / (denom ** delta)  # (B, H, W)
 
-            # Π̃ = 2Δ e^{-2r} C_Δ / (e^{-2r} + ρ²)^{Δ+1}
+            # Π̃ = e^{(d-2Δ)r} * (d(e^{-2r} + ρ^2) - 2Δρ^2) * C_Δ / (e^{-2r} + ρ²)^{Δ+1}
             # This is the analytic r-derivative of the UV-stabilized propagator
+            numerator_c = self.d * (z_sq + rho_sq) - 2*delta*rho_sq
             pi_tilde_c = (
-                norm * 2.0 * delta * z_sq * C / (denom ** (delta + 1.0))
+                norm * exp_factor * numerator_c * delta * z_sq * C / (denom ** (delta + 1.0))
             )  # (B, H, W)
 
             phi_channels.append(K_tilde)
