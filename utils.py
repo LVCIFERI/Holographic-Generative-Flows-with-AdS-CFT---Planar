@@ -386,7 +386,7 @@ def compute_kg_residual_stabilized(
     
     Document eq (uv-stable-ode) for single-warp:
         dΦ̃/dr = Π̃
-        dΠ̃/dr = -(d(f'/f) - 2Δ)Π̃ + [-(1/f²)Δ_ĝ + dΔ(f'/f - 1)]Φ̃
+        dΠ̃/dr = -(d(f'/f) - 2(d-Δ))Π̃ + [-(1/f²)Δ_ĝ + d(d-Δ)(f'/f - 1)]Φ̃
     
     This function computes:
         residual_phi = dΦ̃/dr - Π̃  (should be ~0)
@@ -439,17 +439,17 @@ def compute_kg_residual_stabilized(
     expected_dphi = pi_tilde
     residual_phi = dphi_dr - expected_dphi
     
-    # Expected dΠ̃/dr = -(d(f'/f) - 2Δ)Π̃ + [-(1/f²)λ + dΔ(f'/f - 1)]Φ̃
-    A = float(d) * log_f_prime - 2.0 * deltas_b
+    # Expected dΠ̃/dr = -(d(f'/f) - 2(d-Δ))Π̃ + [-(1/f²)λ + d(d-Δ)(f'/f - 1)]Φ̃
+    A = float(d) * log_f_prime - 2.0 * (float(d)-deltas_b)
     
     if laplacian_eigs is not None:
         lam = laplacian_eigs.to(device=device, dtype=dtype)
         while lam.ndim < phi_tilde.ndim:
             lam = lam.unsqueeze(0)
         inv_f2 = 1.0 / (f * f)
-        B = -inv_f2 * lam + float(d) * deltas_b * (log_f_prime - 1.0)
+        B = -inv_f2 * lam + float(d) * (float(d) - deltas_b) * (log_f_prime - 1.0)
     else:
-        B = float(d) * deltas_b * (log_f_prime - 1.0)
+        B = float(d) * (float(d) - deltas_b) * (log_f_prime - 1.0)
     
     expected_dpi = -A * pi_tilde + B * phi_tilde
     residual_pi = dpi_dr - expected_dpi
