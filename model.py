@@ -20,9 +20,9 @@ This model supports TWO path types:
    - Paper notes this as "robust practical default"
 
 Both modes implement:
-- UV-stabilized variables Φ̃ = e^{Δr}Φ (paper eq. 18)
-- Full Klein-Gordon backbone (paper eqs. 16-17, 20-21)
-- Backbone-subtracted loss (paper eq. 35)
+- UV-stabilized variables Φ̃ = e^{(d-Δ)r}Φ (paper eq. 26)
+- Full Klein-Gordon backbone (paper eqs. 27-28)
+- Backbone-subtracted loss (paper eq. 49)
 - Slice measure weighting ||·||²_{g_{r(t)}}
 
 =============================================================================
@@ -30,7 +30,7 @@ HOLOGRAPHIC POINT-FIELD ENCODING (Paper Section 3.3)
 =============================================================================
 
 This model supports AdS/CFT-faithful encoding of point data using the
-bulk-to-boundary propagator (paper eq. 6):
+bulk-to-boundary propagator (paper eq. 9):
 
     K_Δ(r, x; x') = C_Δ / (e^r |x-x'|² + e^{-r})^Δ
 
@@ -51,22 +51,22 @@ Paper Section 2: Klein-Gordon theory in AdS/CFT
     - Planar: f(r) = e^r, f'/f = 1
     - Klein-Gordon (eq. 3): (∂_r² + d·f'/f·∂_r + f⁻²Δ̂_g - m²)Φ = 0
     - Mass-dimension: m² = Δ(Δ-d)
-    - First-order (eqs. 16-17):
+    - First-order (eqs. 22-23):
         ∂_r Φ = Π
         ∂_r Π = (m² - f⁻²Δ̂_g)Φ - d(f'/f)Π
 
 Paper Section 2.4: Boundary stabilization (UV-stable variables)
-    - Definition (eq. 18): Φ̃ = e^{Δr} Φ,  Π̃ = e^{Δr}(Π + ΔΦ)
-    - Stabilized ODE (eqs. 20-21, planar):
+    - Definition (eq. 26): Φ̃ = e^{(d-Δ)r} Φ,  Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ)
+    - Stabilized ODE (eqs. 27-28, planar):
         dφ̃_k/dr = π̃_k
-        dπ̃_k/dr = |k|² e^{-2r} φ̃_k - (d - 2Δ)π̃_k
-    - Propagator modes (eq. 22):
-        κ̃_{|k|}(r) = (2/Γ(ν)) (|k|e^r/2)^ν K_ν(|k|e^{-r})
+        dπ̃_k/dr = |k|² e^{-2r} φ̃_k - (2Δ-d)π̃_k
+    - Propagator modes (eq. 30):
+        κ̃_{|k|}(r) = (2/Γ(ν)) (|k|e^{-r}/2)^ν K_ν(|k|e^{-r})
 
 Paper Section 3: Elements of flow matching
-    - Affine parameter (eq. 29, planar):
+    - Affine parameter (eq. 40, planar):
         u(r) = [1 - e^{-d(r - r_IR)}] / [1 - e^{-d(r_UV - r_IR)}]
-    - Loss (eq. 35):
+    - Loss (eq. 49):
         L(θ) = <||R_θ - (U_t - δ_r V_KG)||²_{g_{r(t)}}>_t
 
 Paper Algorithm 1 (Training):
@@ -149,15 +149,15 @@ class FullAdSBackbone(nn.Module):
 
     Document eq (uv-stable-ode):
         ∂_r Φ̃^(i) = Π̃^(i)
-        ∂_r Π̃^(i) = -(d·f'/f - 2Δ_i)Π̃^(i) - (1/f²)Δ_ĝ Φ̃^(i) + dΔ_i(f'/f - 1)Φ̃^(i)
+        ∂_r Π̃^(i) = -((2Δ_i-d) - d(1-f'/f))Π̃^(i) - (1/f²)Δ_ĝ Φ̃^(i) + d(Δ_i-d)(1-f'/f)Φ̃^(i)
 
     For planar slicing (f'/f = 1):
         ∂_r Φ̃ = Π̃
-        ∂_r Π̃ = -(d - 2Δ)Π̃ - (1/f²)Δ_ĝ Φ̃
+        ∂_r Π̃ = -(1/f²)Δ_ĝ Φ̃  - (2Δ - d)Π̃ 
 
     For point data (no spatial structure, Δ_ĝ = 0):
         ∂_r Φ̃ = Π̃
-        ∂_r Π̃ = (2Δ - d)Π̃
+        ∂_r Π̃ = -(2Δ - d)Π̃
 
     Attributes
     ----------
@@ -239,13 +239,13 @@ class FullAdSBackbone(nn.Module):
             # HSV Klein-Gordon equations for RAW fields (code convention):
             #
             #   dΦ/dr = Π
-            #   dΠ/dr = [(1-p)r]^{2γ}|k|²Φ + (dγ/r)Π
+            #   dΠ/dr = (p*r)^{2γ}|k|²Φ + (dγ/r)Π
             #
-            # where γ = p/(1-p), p=0 is flat, p→1 is AdS.
+            # where γ = (1-p)/p, p = 1 is flat, p → 0 is AdS.
             # These equations match the raw propagator from encoding (no UV stabilization).
             #
             # Key difference from Appendix A: +dγ/r coefficient (was -dγ/r for Φ̃,Π̃)
-            # Note: [(1-p)r]^{2γ} = 1/f² is computed by geometry.f_inv2(r)
+            # Note: (p*r)^{2γ} = 1/f² is computed by geometry.f_inv2(r)
             # =================================================================
             
             gamma = self.geometry.kg_gamma
@@ -272,13 +272,13 @@ class FullAdSBackbone(nn.Module):
             r_safe = r_t.clamp(min=1e-8)
             
             # =================================================================
-            # RAW HSV Klein-Gordon equations (code convention: p=0 flat, p→1 AdS):
+            # RAW HSV Klein-Gordon equations (code convention: p = 1 flat, p → 0 AdS):
             #
             #   dΦ/dr = Π
-            #   dΠ/dr = [(1-p)r]^{2γ}|k|²Φ + (dγ/r)Π
+            #   dΠ/dr = (p*r)^{2γ}|k|²Φ + (dγ/r)Π
             #
             # This matches the raw propagator from encoding (no UV stabilization).
-            # Note: +dγ/r coefficient (opposite sign from stabilized equations)
+            # Note: +dγ/r coefficient
             # =================================================================
             
             # Coefficients for raw HSV equations:
@@ -287,7 +287,7 @@ class FullAdSBackbone(nn.Module):
             one_over_r = 1.0 / r_safe
             
             pi_coeff = d_gamma * one_over_r       # +dγ/r (changed sign!)
-            phi_coeff = 0.0                      # No dγ/r² term for raw fields
+            phi_coeff = 0.0                      # No dγ/r² term for raw fields; massless
             
             # Broadcast to match state shape
             ndim = phi_tilde.ndim
@@ -300,7 +300,7 @@ class FullAdSBackbone(nn.Module):
             # dΠ/dr = +dγ/r · Π + 0 · Φ  (before Laplacian)
             dpi_dr = pi_coeff * pi_tilde
             
-            # Add Laplacian term: [(1-p)r]^{2γ}|k|²Φ = f_inv_sq * (-Δ_ĝ)Φ
+            # Add Laplacian term: (p*r)^{2γ}|k|²Φ = f_inv_sq * (-Δ_ĝ)Φ
             if self.slice_op is not None:
                 f_inv_sq = self.geometry.f_inv2(r)
                 if not isinstance(f_inv_sq, Tensor):
@@ -323,7 +323,7 @@ class FullAdSBackbone(nn.Module):
         # =================================================================
         # Standard AdS Klein-Gordon equations (non-HSV geometries)
         # Document eq (uv-stable-ode):
-        #   ∂_r Π̃ = (2Δ - d·f'/f)Π̃ + dΔ(f'/f - 1)Φ̃ - (1/f²)Δ_ĝΦ̃
+        #   ∂_r Π̃ = -(1/f²)Δ_ĝΦ̃  + d(Δ-d)(1 - f'/f)Φ̃  - (2Δ - d - d(1 - f'/f))Π̃ 
         # =================================================================
 
         # Get geometry factors at radius r
@@ -356,14 +356,14 @@ class FullAdSBackbone(nn.Module):
         # Coefficients for Π̃ equation
         d_fpf = self.d * f_prime_over_f
         two_delta_b = two_delta.view(1, -1, *([1] * (ndim - 2)))
-        pi_coeff = two_delta_b - d_fpf
+        pi_coeff = -(two_delta_b - 2*self.d + d_fpf)
 
         # dΔ(f'/f - 1) term
         f_prime_over_f_minus_1 = f_prime_over_f - 1.0
         d_delta_b = d_times_delta.view(1, -1, *([1] * (ndim - 2)))
-        phi_coeff = d_delta_b * f_prime_over_f_minus_1
+        phi_coeff = (self.d**2 - d_delta_b) * f_prime_over_f_minus_1
 
-        # ∂_r Π̃ = (2Δ - d·f'/f)Π̃ + dΔ(f'/f - 1)Φ̃ - (1/f²)Δ_ĝΦ̃
+        # Detting dpi_dr to d(Δ-d)(1 - f'/f)Φ̃  - (2Δ - d - d(1 - f'/f))Π̃ 
         dpi_dr = pi_coeff * pi_tilde + phi_coeff * phi_tilde
 
         # Add Laplacian term if we have spatial structure
@@ -554,8 +554,8 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             geometry=self.geometry,
             bulk_field=self.bulk_field,
             disc=self.disc,
-            embed_src=None,
-            embed_vev=self._identity_embed,
+            embed_src=self._identity_embed,
+            embed_vev=None,
             noise_sigma=config.lift_noise_sigma,
         )
 
@@ -1423,14 +1423,14 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         delta = self.bulk_field.deltas[0]
         
         # Reconstruct UV-stabilized state from canonical (Φ, P)
-        # Φ̃ = f^Δ · Φ
+        # Φ̃ = f^(d-Δ) · Φ
         # Π = P / ω
-        # Π̃ = f^Δ · (Π + Δ·(f'/f)·Φ)
-        f_delta = f ** delta
+        # Π̃ = f^(d-Δ) · (Π + (d-Δ)·(f'/f)·Φ)
+        f_d_m_delta = f ** (self.d-delta)
         pi = P / omega.clamp(min=1e-10)
         
-        phi_tilde = f_delta * phi
-        pi_tilde = f_delta * (pi + delta * f_prime_over_f * phi)
+        phi_tilde = f_d_m_delta * phi
+        pi_tilde = f_d_m_delta * (pi + (self.d-delta) * f_prime_over_f * phi)
         
         state = BulkState(phi_tilde=phi_tilde, pi_tilde=pi_tilde)
         
@@ -1439,13 +1439,13 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         
         # V.pi_tilde is dΠ̃/dr. We need dP/dr.
         # 
-        # From P = ω·Π and Π̃ = f^Δ·(Π + Δ·(f'/f)·Φ):
-        #   Π = f^{-Δ}·Π̃ - Δ·(f'/f)·Φ
-        #   P = ω·Π = ω·f^{-Δ}·Π̃ - ω·Δ·(f'/f)·Φ
+        # From P = ω·Π and Π̃ = f^(d-Δ)·(Π + (d-Δ)·(f'/f)·Φ):
+        #   Π = f^{-(d-Δ)}·Π̃ - (d-Δ)·(f'/f)·Φ
+        #   P = ω·Π = ω·f^{-(d-Δ)}·Π̃ - ω·(d-Δ)·(f'/f)·Φ
         #
         # Taking d/dr and using dΦ/dr = Π = P/ω:
-        #   dP/dr = d(ω·f^{-Δ})/dr · Π̃ + ω·f^{-Δ}·dΠ̃/dr 
-        #           - d(ω·Δ·(f'/f))/dr · Φ - ω·Δ·(f'/f)·dΦ/dr
+        #   dP/dr = d(ω·f^{-(d-Δ)})/dr · Π̃ + ω·f^{-(d-Δ)}·dΠ̃/dr 
+        #           - d(ω·(d-Δ)·(f'/f))/dr · Φ - ω·(d-Δ)·(f'/f)·dΦ/dr
         #
         # For simplicity, use the direct transformation:
         #   dP/dr = ω · dΠ/dr + (dω/dr) · Π
@@ -1453,7 +1453,7 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         #         = ω · (dΠ/dr + d·(f'/f)·Π)
         #
         # where dΠ/dr comes from dΠ̃/dr via:
-        #   dΠ/dr = f^{-Δ}·(dΠ̃/dr - Δ·(f'/f)·Π̃) - Δ·(f'/f)·dΦ/dr - Δ·(f'/f)'·Φ
+        #   dΠ/dr = f^{-(d-Δ)}·(dΠ̃/dr - (d-Δ)·(f'/f)·Π̃) - (d-Δ)·(f'/f)·dΦ/dr - (d-Δ)·(f'/f)'·Φ
         #
         # But dΦ/dr = Π (from backbone), so this simplifies.
         
@@ -1461,32 +1461,32 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         d = self.d
         
         # dΠ/dr from dΠ̃/dr:
-        # Π̃ = f^Δ·(Π + Δ·(f'/f)·Φ)
-        # dΠ̃/dr = Δ·(f'/f)·f^Δ·(Π + Δ·(f'/f)·Φ) + f^Δ·(dΠ/dr + Δ·(f'/f)·dΦ/dr + Δ·(f'/f)'·Φ)
-        #       = Δ·(f'/f)·Π̃ + f^Δ·dΠ/dr + f^Δ·Δ·(f'/f)·Π + f^Δ·Δ·(f'/f)'·Φ
+        # Π̃ = f^(d-Δ)·(Π + (d-Δ)·(f'/f)·Φ)
+        # dΠ̃/dr = (d-Δ)·(f'/f)·f^(d-Δ)·(Π + (d-Δ)·(f'/f)·Φ) + f^(d-Δ)·(dΠ/dr + (d-Δ)·(f'/f)·dΦ/dr + (d-Δ)·(f'/f)'·Φ)
+        #       = (d-Δ)·(f'/f)·Π̃ + f^(d-Δ)·dΠ/dr + f^(d-Δ)·(d-Δ)·(f'/f)·Π + f^(d-Δ)·(d-Δ)·(f'/f)'·Φ
         #
         # Solving for dΠ/dr:
-        # f^Δ·dΠ/dr = dΠ̃/dr - Δ·(f'/f)·Π̃ - f^Δ·Δ·(f'/f)·Π - f^Δ·Δ·(f'/f)'·Φ
-        # dΠ/dr = f^{-Δ}·(dΠ̃/dr - Δ·(f'/f)·Π̃) - Δ·(f'/f)·Π - Δ·(f'/f)'·Φ
+        # f^(d-Δ)·dΠ/dr = dΠ̃/dr - (d-Δ)·(f'/f)·Π̃ - f^(d-Δ)·(d-Δ)·(f'/f)·Π - f^(d-Δ)·(d-Δ)·(f'/f)'·Φ
+        # dΠ/dr = f^{-(d-Δ)}·(dΠ̃/dr - (d-Δ)·(f'/f)·Π̃) - (d-Δ)·(f'/f)·Π - (d-Δ)·(f'/f)'·Φ
         
         # Compute (f'/f)' = d/dr[f'/f]
         # For planar AdS: f'/f = 1, so (f'/f)' = 0
-        # For HSV: f'/f = -p/[(1-p)r], so (f'/f)' = p/[(1-p)r²]
+        # For HSV: f'/f = -(1-p)/(p*r), so (f'/f)' = (1-p)/(p * r²)
         if hasattr(self.geometry, 'p') and self.geometry.p > 0:
             p = self.geometry.p
             r_safe = r.clamp(min=1e-10)
             if r_safe.ndim < phi.ndim:
                 r_safe = r_safe.view(*([1] * (phi.ndim - r_safe.ndim)), *r_safe.shape).expand_as(phi)
-            f_prime_over_f_deriv = p / ((1 - p) * r_safe * r_safe)
+            f_prime_over_f_deriv = (1-p) / (p * r_safe * r_safe)
         else:
             f_prime_over_f_deriv = torch.zeros_like(phi)
         
         dPi_tilde_dr = V.pi_tilde
-        f_neg_delta = f ** (-delta)
+        f_neg_d_m_delta = f ** (-(self.d - delta))
         
-        dPi_dr = (f_neg_delta * (dPi_tilde_dr - delta * f_prime_over_f * pi_tilde) 
-                  - delta * f_prime_over_f * pi 
-                  - delta * f_prime_over_f_deriv * phi)
+        dPi_dr = (f_neg_d_m_delta * (dPi_tilde_dr - (self.d - delta) * f_prime_over_f * pi_tilde) 
+                  - (self.d - delta) * f_prime_over_f * pi 
+                  - (self.d - delta) * f_prime_over_f_deriv * phi)
         
         # dP/dr = ω·dΠ/dr + (dω/dr)·Π = ω·dΠ/dr + d·(f'/f)·ω·Π
         dP_dr = omega * dPi_dr + d * f_prime_over_f * omega * pi
