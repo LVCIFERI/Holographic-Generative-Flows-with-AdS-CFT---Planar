@@ -5,9 +5,9 @@
 # Hyperscaling-Violating (HSV) Geometry Experiments
 #
 # This script runs comprehensive HSV geometry experiments with planar boundary,
-# exploring the parameter space p ∈ [0, 1) which interpolates:
-#   - p = 0: Flat (Minkowski) spacetime
-#   - p → 1: AdS (Anti-de Sitter) spacetime
+# exploring the parameter space p ∈ (0, 1] which interpolates:
+#   - p = 1: Flat (Minkowski) spacetime
+#   - p → 0: AdS (Anti-de Sitter) spacetime
 #
 # HSV Geometries:
 #   - planar_hsv: HSV with R^d boundary (full p range)
@@ -61,7 +61,7 @@ N_VIZ=10000
 SEEDS=(42)
 
 # HSV p values covering the full range
-PLANAR_P_VALUES=(0.0 0.1 0.25 0.5 0.75 0.9)
+PLANAR_P_VALUES=(0.1 0.25 0.5 1.0)
 
 # Utility functions
 timestamp() {
@@ -145,6 +145,7 @@ run_baselines() {
     run_with_seeds "flat_${DATASET}" "${OUTPUT_BASE}/baselines/flat_${DATASET}" \
         --dataset "$DATASET" \
         --slice_geometry flat \
+        --deltas 2.0 \
         --path_type hermite \
         --use_spectral_encoding \
         --spectral_n_modes $SPECTRAL_MODES \
@@ -160,6 +161,7 @@ run_baselines() {
     run_with_seeds "planar_ads_${DATASET}" "${OUTPUT_BASE}/baselines/planar_ads_${DATASET}" \
         --dataset "$DATASET" \
         --slice_geometry planar \
+        --deltas 2.0 \
         --path_type hermite \
         --use_spectral_encoding \
         --spectral_n_modes $SPECTRAL_MODES \
