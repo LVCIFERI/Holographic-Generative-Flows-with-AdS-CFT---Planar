@@ -23,7 +23,7 @@ Paper eq. 3 (Klein-Gordon equation):
     the spatial structure of the field.
 
 Paper eqs. 20-21 (UV-stabilized, planar):
-    dπ̃_k/dr = |k|² e^{-2r} φ̃_k - (d - 2Δ)π̃_k
+    dπ̃_k/dr = |k|² e^{-2r} φ̃_k - (2Δ - d)π̃_k
 
     Here the Laplacian eigenvalue |k|² appears explicitly.
 
