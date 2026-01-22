@@ -31,16 +31,13 @@ Class Hierarchy
     AdSGeometry (abstract base)
     ├── PlanarAdS                 (f = e^r)
     ├── FlatGeometry              (f = 1, ablation)
-    └── HyperscalingViolatingAdS  (f = [(1-p)r]^{-p/(1-p)})
+    └── HyperscalingViolatingAdS  (f = (p*r)^{-(1-p)/p})
 
 HSV Convention Note
 -------------------
-The code uses p ∈ [0, 1) where:
-    p = 0  → flat space (f = 1)
-    p → 1  → planar AdS (f → e^r)
-
-This is INVERTED from the paper's convention where p=0 is AdS and p=1 is flat.
-The mathematical formulas are adjusted accordingly.
+The code uses p ∈ (0, 1] where:
+    p = 1  → flat space (f = 1)
+    p → 0  → planar AdS (f → e^r)
 
 Adding New Geometries
 ---------------------
@@ -837,39 +834,35 @@ class FlatGeometry(AdSGeometry):
 class HyperscalingViolatingAdS(AdSGeometry):
     """
     Hyperscaling-violating (HSV) geometry: one-parameter family interpolating
-    between flat space and AdS (paper Section 5).
+    between flat space and AdS (paper Appendix A).
 
-    CONVENTION NOTE: The code uses p ∈ [0, 1) with p=0 flat and p→1 AdS.
-    This is INVERTED from the paper's convention (paper eq. 43 uses p=0 for AdS).
-
-    Paper reference (with inverted p):
-        Original metric: ds² = z^{-2(1-p)}(dz² + dx²)  [paper eq. 43]
+    Original metric: ds² = z^{-2(1-p)}(dz² + dx²)  [paper eq. A1]
         
-        After coordinate transform r = z^p/p:
-        ds² = dr² + (pr)^{-2γ} dx²,  γ = 1/p - 1  [paper eq. 44]
+    After coordinate transform r = z^p/p:
+        ds² = dr² + (p*r)^{-2γ} dx²,  γ = 1/p - 1  [paper eq. A2]
 
-    Code parameterization (inverted convention):
-        Warp factor: f_p(r) = [(1-p)r]^{-p/(1-p)}    for p ∈ [0, 1)
+    Warp factor: f_p(r) = (p*r)^{-γ}    for p ∈ (0, 1]
 
     Special cases:
-        p = 0:  f(r) = 1           (flat space)
-        p → 1:  f(r) → e^r         (planar AdS limit)
+        p = 1:  f(r) = 1           (flat space)
+        p → 0:  f(r) → e^r         (planar AdS limit)
 
     Key formulas:
-        f'/f = -p / [(1-p)r]
-        ω(r) = f(r)^d = [(1-p)r]^{-α}  where α = pd/(1-p)
+        f'/f = -γ/r
+        ω(r) = f(r)^d = (p*r)^{-dγ}
 
-    Affine coordinate for Hermite path (paper eq. 48 adapted):
-        u_p(r) = (r^γ - r_IR^γ) / (r_UV^γ - r_IR^γ)
-        γ = 1 + α = 1 + pd/(1-p) = [1 + (d-1)p] / (1-p)
+    Affine coordinate for Hermite path (paper eq. A3):
+        u_p(r) = (r^α - r_IR^α) / (r_UV^α - r_IR^α)
+        α = 1 + dγ = 1 + (1-p)d/p = [1 + (d-1)(1-p)]/p
 
-    HSV propagator (paper eq. 47):
+    HSV propagator (paper eq. A6):
         K̂(u, k) = (|k|u)^β K_β(|k|u) / (2^{β-1} Γ(β))
-        β = (1 + (d-1)p) / 2  (Bessel order)
+        β = (1 + (d-1)(1-p)) / 2  (Bessel order)
+        u = (p*r)^{1/p}
 
     Numerical handling:
-        - For p < threshold (default 0.95): use HSV formulas
-        - For p >= threshold: switch to exact AdS formulas
+        - For p > threshold (default 0.05): use HSV formulas
+        - For p <= threshold: switch to exact AdS formulas
         - Requires r > 0 (singularity at r=0 for p > 0)
 
     References:
@@ -885,44 +878,44 @@ class HyperscalingViolatingAdS(AdSGeometry):
             cfg: Geometry configuration with hsv_p parameter
 
         Raises:
-            ValueError: If hsv_p is not in [0, 1)
+            ValueError: If hsv_p is not in (0, 1]
         """
         super().__init__(cfg)
         self._p = cfg.hsv_p
         self._threshold = cfg.hsv_ads_threshold
 
-        if not 0.0 <= self._p < 1.0:
+        if not 0.0 < self._p <= 1.0:
             raise ValueError(f"HSV parameter p must be in [0, 1), got {self._p}")
 
         # Precompute useful quantities
-        self._use_ads = self._p >= self._threshold
+        self._use_ads = self._p <= self._threshold
         if not self._use_ads:
             self._one_minus_p = 1.0 - self._p
-            # Exponent: -p/(1-p)
-            self._exponent = -self._p / self._one_minus_p
-            # Alpha for slice weight: α = pd/(1-p)
-            self._alpha = self._p * self.d / self._one_minus_p
-            # Gamma for affine coordinate: γ = 1 + α
-            self._gamma = 1.0 + self._alpha
+            # Exponent -γ: -(1-p)/p
+            self._exponent = -self._one_minus_p / self._p
+            # Gamma*d for slice weight: d*γ = (1-p)d/p
+            self._gamma_d = self._one_minus_p * self.d / self._p
+            # Alpha for affine coordinate: α = 1 + d*γ
+            self._alpha = 1.0 + self._gamma_d
 
     @property
     def p(self) -> float:
-        """HSV parameter p ∈ [0, 1)."""
+        """HSV parameter p ∈ (0, 1]."""
         return self._p
 
     @property
-    def gamma(self) -> float:
-        """Affine coordinate exponent γ = 1 + pd/(1-p)."""
-        if self._use_ads:
-            return float('inf')  # AdS limit
-        return self._gamma
-
-    @property
     def alpha(self) -> float:
-        """Slice weight exponent α = pd/(1-p)."""
+        """Affine coordinate exponent α = 1 + (1-p)d/p."""
         if self._use_ads:
             return float('inf')  # AdS limit
         return self._alpha
+
+    @property
+    def gamma_d(self) -> float:
+        """Slice weight exponent d*γ = (1-p)d/p."""
+        if self._use_ads:
+            return float('inf')  # AdS limit
+        return self._gamma_d
 
     @property
     def is_hsv(self) -> bool:
@@ -936,25 +929,25 @@ class HyperscalingViolatingAdS(AdSGeometry):
         
         This is the γ appearing in the raw HSV field equations:
             dΦ/dr = Π
-            dΠ/dr = [(1-p)r]^{2γ}|k|²Φ + (dγ/r)Π
+            dΠ/dr = (p*r)^{2γ}|k|²Φ + (dγ/r)Π
         
-        Convention (code): p=0 is flat, p→1 is AdS
-            γ = p / (1-p)
+        Convention (code): p = 1 is flat, p → 0 is AdS
+            γ = (1-p) / p
         
         Returns:
             γ for HSV Klein-Gordon backbone equations
         """
         if self._use_ads:
             return float('inf')  # AdS limit
-        if self._p == 0.0:
+        if self._p == 1.0:
             return 0.0  # Flat space: γ = 0
-        return self._p / self._one_minus_p
+        return self._one_minus_p / self._p
 
     def log_f(self, r: Tensor) -> Tensor:
         """
         Compute σ = log f(r) for stable HSV computations.
         
-        For HSV: σ = -p/(1-p) * log((1-p)*r)
+        For HSV: σ = -(1-p)/p * log(p*r)
         For AdS limit: σ = r
         """
         r = _as_tensor(r, device=self.device, dtype=self.dtype)
@@ -962,17 +955,17 @@ class HyperscalingViolatingAdS(AdSGeometry):
         if self._use_ads:
             return r
         
-        if self._p == 0.0:
+        if self._p == 1.0:
             return torch.zeros_like(r)
         
         r_safe = r.clamp(min=self.cfg.eps)
-        return self._exponent * torch.log(self._one_minus_p * r_safe)
+        return self._exponent * torch.log(self._p * r_safe)
 
     def r_from_sigma(self, sigma: float) -> float:
         """
         Compute r given σ = log f(r).
         
-        For HSV: r = exp(-(1-p)/p * σ) / (1-p)
+        For HSV: r = exp(-p/(1-p) * σ) / p
         For AdS limit: r = σ
         
         Args:
@@ -984,21 +977,19 @@ class HyperscalingViolatingAdS(AdSGeometry):
         if self._use_ads:
             return sigma
         
-        if self._p < 1e-10:
-            # p ≈ 0: f ≈ 1, σ ≈ 0 always, return arbitrary positive r
+        if self._one_minus_p < 1e-10:
+            # p ≈ 1: f ≈ 1, σ ≈ 0 always, return arbitrary positive r
             return 1.0
         
-        # σ = -p/(1-p) * log((1-p)*r)
-        # => log((1-p)*r) = -σ*(1-p)/p
-        # => (1-p)*r = exp(-σ*(1-p)/p)
-        # => r = exp(-σ*(1-p)/p) / (1-p)
-        return math.exp(-sigma * self._one_minus_p / self._p) / self._one_minus_p
+        # σ = -(1-p)/p * log(p*r)
+        # => r = exp(-σ*p/(1-p)) / p
+        return math.exp(-sigma * self._p / self._one_minus_p) / self._p
 
     def u_to_r(self, u: float) -> float:
         """
         Convert HSV coordinate u to radial coordinate r.
         
-        u = [(1-p)r]^{1/(1-p)}  =>  r = u^{1-p} / (1-p)
+        u = (p*r)^{1/p}  =>  r = u^{p} / p
         
         Args:
             u: HSV coordinate (appears in propagator K̂(u,k))
@@ -1010,12 +1001,12 @@ class HyperscalingViolatingAdS(AdSGeometry):
             # AdS limit: u = z = e^{-r}, so r = -log(u)
             return -math.log(max(u, 1e-10))
         
-        if self._p < 1e-10:
+        if self._one_minus_p < 1e-10:
             # Flat space: u = r
             return u
         
-        # HSV: r = u^{1-p} / (1-p)
-        return (u ** self._one_minus_p) / self._one_minus_p
+        # HSV: r = u^p / p
+        return (u ** self._p) / self._p
 
     def get_r_bounds_from_u(
         self, u_uv: float, u_ir: float
@@ -1025,11 +1016,11 @@ class HyperscalingViolatingAdS(AdSGeometry):
         
         The u coordinate is natural for HSV:
         - Appears directly in propagator: K̂(u,k) = (|k|u)^β K_β(|k|u)
-        - p=0: u = r (flat), p→1: u = z = e^{-r} (AdS)
+        - p = 1: u = r (flat), p → 0: u = z = e^{-r} (AdS)
         - Smaller u is UV (boundary), larger u is IR (bulk)
         
         HSV coordinate convention:
-        - f(r) = [(1-p)r]^{-p/(1-p)} diverges as r→0
+        - f(r) = (p*r)^{-(1-p)/p} diverges as r→0
         - Small r = large f = UV (boundary)
         - Large r = small f = IR (bulk)
         - Therefore r_uv < r_ir for HSV (opposite of standard AdS)
@@ -1071,9 +1062,9 @@ class HyperscalingViolatingAdS(AdSGeometry):
 
     def f(self, r: Tensor) -> Tensor:
         """
-        Warp factor f_p(r) = [(1-p)r]^(-p/(1-p)).
+        Warp factor f_p(r) = (p*r)^(-(1-p)/p).
 
-        For p >= threshold, switches to AdS: f(r) = e^r.
+        For p <= threshold, switches to AdS: f(r) = e^r.
 
         Args:
             r: Radial coordinate (must be > 0 for p > 0)
@@ -1087,21 +1078,20 @@ class HyperscalingViolatingAdS(AdSGeometry):
             # AdS limit: f(r) = e^r
             return torch.exp(r)
 
-        if self._p == 0.0:
+        if self._p == 1.0:
             # Flat space: f(r) = 1
             return torch.ones_like(r)
 
-        # HSV: f(r) = [(1-p)r]^(-p/(1-p))
         # Clamp r to avoid log of zero/negative
         r_safe = r.clamp(min=self.cfg.eps)
-        base = self._one_minus_p * r_safe
+        base = self._p * r_safe
         return torch.pow(base, self._exponent)
 
     def log_f_prime(self, r: Tensor) -> Tensor:
         """
-        Logarithmic derivative f'/f = -p / [(1-p)r].
+        Logarithmic derivative f'/f = -(1-p) / (p*r).
 
-        For p >= threshold, switches to AdS: f'/f = 1.
+        For p <= threshold, switches to AdS: f'/f = 1.
 
         Args:
             r: Radial coordinate
@@ -1115,19 +1105,18 @@ class HyperscalingViolatingAdS(AdSGeometry):
             # AdS limit: f'/f = 1
             return torch.ones_like(r)
 
-        if self._p == 0.0:
+        if self._p == 1.0:
             # Flat space: f'/f = 0
             return torch.zeros_like(r)
 
-        # HSV: f'/f = -p / [(1-p)r]
         r_safe = r.clamp(min=self.cfg.eps)
-        return -self._p / (self._one_minus_p * r_safe)
+        return -self._one_minus_p / (self._p * r_safe)
 
     def slice_weight(self, r: Tensor) -> Tensor:
         """
-        Slice volume weight ω(r) = f(r)^d = [(1-p)r]^(-α).
+        Slice volume weight ω(r) = f(r)^d = (p*r)^(-dγ).
 
-        For p >= threshold, switches to AdS: ω(r) = e^(dr).
+        For p <= threshold, switches to AdS: ω(r) = e^(dr).
 
         Args:
             r: Radial coordinate
@@ -1141,25 +1130,24 @@ class HyperscalingViolatingAdS(AdSGeometry):
             # AdS limit: ω(r) = e^(dr)
             return torch.exp(self.d * r)
 
-        if self._p == 0.0:
+        if self._p == 1.0:
             # Flat space: ω(r) = 1
             return torch.ones_like(r)
 
-        # HSV: ω(r) = [(1-p)r]^(-α) where α = pd/(1-p)
         r_safe = r.clamp(min=self.cfg.eps)
-        base = self._one_minus_p * r_safe
-        return torch.pow(base, -self._alpha)
+        base = self._p * r_safe
+        return torch.pow(base, -self._gamma_d)
 
     def affine_parameter(self, r: Tensor, r_ir: float, r_uv: float) -> Tensor:
         """
         Explicit affine parameter u_p(r) for HSV geometry.
 
-        u_p(r) = (r^γ - r_IR^γ) / (r_UV^γ - r_IR^γ)
+        u_p(r) = (r^α - r_IR^α) / (r_UV^α - r_IR^α)
 
-        where γ = 1 + pd/(1-p).
+        where α = 1 + (1-p)d/p.
 
-        For p >= threshold, uses AdS formula.
-        For p = 0, reduces to linear: u = (r - r_IR) / (r_UV - r_IR).
+        For p <= threshold, uses AdS formula.
+        For p = 1, reduces to linear: u = (r - r_IR) / (r_UV - r_IR).
 
         Args:
             r: Radial coordinate(s)
@@ -1178,15 +1166,14 @@ class HyperscalingViolatingAdS(AdSGeometry):
             den = 1.0 - math.exp(d * (r_ir - r_uv))
             return num / den
 
-        if self._p == 0.0:
+        if self._p == 1.0:
             # Flat space: linear
             return (r - r_ir) / (r_uv - r_ir)
 
-        # HSV: u_p(r) = (r^γ - r_IR^γ) / (r_UV^γ - r_IR^γ)
-        gamma = self._gamma
-        r_ir_g = r_ir ** gamma
-        r_uv_g = r_uv ** gamma
-        r_g = torch.pow(r.clamp(min=self.cfg.eps), gamma)
+        alpha = self._alpha
+        r_ir_g = r_ir ** alpha
+        r_uv_g = r_uv ** alpha
+        r_g = torch.pow(r.clamp(min=self.cfg.eps), alpha)
         return (r_g - r_ir_g) / (r_uv_g - r_ir_g)
 
     def dr_du(self, r: Tensor, r_ir: float, r_uv: float) -> Tensor:
@@ -1194,8 +1181,7 @@ class HyperscalingViolatingAdS(AdSGeometry):
         Jacobian dr/du = Z * ω(r) for endpoint tangent computation.
 
         For HSV:
-            dr/du = (r_UV^γ - r_IR^γ) / γ * [(1-p)r]^(-α) / (1-p)^α
-                  = (r_UV^γ - r_IR^γ) / (γ * r^α)
+            dr/du = (r_UV^α - r_IR^α) / (α * r^(dγ))
 
         Args:
             r: Radial coordinate(s)
@@ -1216,24 +1202,23 @@ class HyperscalingViolatingAdS(AdSGeometry):
             Z_scaled = (1.0 - math.exp(d * (r_ir - r_uv))) / d
             return Z_scaled * torch.exp(d * (r - r_ir))
 
-        if self._p == 0.0:
+        if self._p == 1.0:
             # Flat space: dr/du = r_UV - r_IR (constant)
             return torch.full_like(r, r_uv - r_ir)
 
-        # HSV: dr/du = (r_UV^γ - r_IR^γ) / (γ * r^α)
-        gamma = self._gamma
         alpha = self._alpha
-        r_ir_g = r_ir ** gamma
-        r_uv_g = r_uv ** gamma
+        gamma_d = self._gamma_d
+        r_ir_g = r_ir ** alpha
+        r_uv_g = r_uv ** alpha
         r_safe = r.clamp(min=self.cfg.eps)
-        return (r_uv_g - r_ir_g) / (gamma * torch.pow(r_safe, alpha))
+        return (r_uv_g - r_ir_g) / (alpha * torch.pow(r_safe, gamma_d))
 
     def normalization_Z(self, r_ir: float, r_uv: float) -> float:
         """
         Normalization constant Z = ∫_{r_IR}^{r_UV} dr/ω(r).
 
         For HSV:
-            Z = (1-p)^α * (r_UV^γ - r_IR^γ) / γ
+            Z = p^(d*γ) * (r_UV^α - r_IR^α) / α
 
         Args:
             r_ir: IR cutoff radius
@@ -1249,16 +1234,15 @@ class HyperscalingViolatingAdS(AdSGeometry):
             d = self.d
             return math.exp(-d * r_ir) * (1.0 - math.exp(d * (r_ir - r_uv))) / d
 
-        if self._p == 0.0:
+        if self._p == 1.0:
             # Flat space
             return r_uv - r_ir
 
-        # HSV: Z = (1-p)^α * (r_UV^γ - r_IR^γ) / γ
-        gamma = self._gamma
         alpha = self._alpha
-        r_ir_g = r_ir ** gamma
-        r_uv_g = r_uv ** gamma
-        return (self._one_minus_p ** alpha) * (r_uv_g - r_ir_g) / gamma
+        gamma_d = self._gamma_d
+        r_ir_g = r_ir ** alpha
+        r_uv_g = r_uv ** alpha
+        return (self._p ** gamma_d) * (r_uv_g - r_ir_g) / alpha
 
     def affine_norm_const(
         self,
@@ -1307,10 +1291,9 @@ class HyperscalingViolatingAdS(AdSGeometry):
     def __repr__(self) -> str:
         return (
             f"HyperscalingViolatingAdS(d={self.d}, p={self._p:.4f}, "
-            f"gamma={self._gamma if not self._use_ads else 'inf':.4f}, "
+            f"alpha={self._alpha if not self._use_ads else float('inf'):.4f}, "
             f"use_ads={self._use_ads})"
         )
-
 
 # =============================================================================
 # Factory Function
