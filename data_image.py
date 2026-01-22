@@ -683,7 +683,7 @@ class ImageSpectralLaplacian(nn.Module):
     """
     Laplacian operator for image spectral coefficients.
 
-    In Fourier space: Δφ̂(k) = -|k|² φ̂(k)
+    In Fourier space: Δφ̂(x) = -|k|² φ̂(k)
 
     Attributes
     ----------
