@@ -15,14 +15,14 @@ Document References
 -------------------
 Section 5 (UV stabilization):
     The UV-stabilized variables are defined as:
-        Φ̃^(i)(r,·) = e^{Δ_i r} Φ^(i)(r,·)
-        Π̃^(i)(r,·) = e^{Δ_i r} (Π^(i)(r,·) + Δ_i Φ^(i)(r,·))
+        Φ̃^(i)(r,·) = e^{(d-Δ_i) r} Φ^(i)(r,·)
+        Π̃^(i)(r,·) = e^{(d-Δ_i) r} (Π^(i)(r,·) + (d-Δ_i) Φ^(i)(r,·))
 
     These remove the exponential decay/growth and give O(1) quantities.
 
 Section 3 (Bulk-boundary propagator):
     For planar AdS, the bulk-boundary propagator in Fourier space is:
-        K̂_Δ(z, k) ∝ |k|^ν K_ν(|k|z)
+        K̂_Δ(z, k) ∝ z^(d/2) |k|^ν K_ν(|k|z)
     where ν = Δ - d/2 and K_ν is the modified Bessel function.
 
 Class Hierarchy
@@ -238,8 +238,6 @@ class BulkField(nn.Module):
     Document eq (mass-dimension):
         m_i² = Δ_i(Δ_i - d)
 
-    The parameter α_i = 2Δ_i - d controls the leading asymptotic behavior.
-
     Attributes
     ----------
     d : int
@@ -248,8 +246,6 @@ class BulkField(nn.Module):
         Conformal dimensions Δ_i
     m2 : Tensor
         Bulk masses m_i² = Δ_i(Δ_i - d)
-    alpha : Tensor
-        Asymptotic exponents α_i = 2Δ_i - d
     n_fields : int
         Number of field channels
 
@@ -338,8 +334,8 @@ class BulkField(nn.Module):
         Map physical variables (Φ, Π) to UV-stabilized variables (Φ̃, Π̃).
 
         Document eq (uv-stable-def):
-            Φ̃^(i)(r,·) = e^{Δ_i r} Φ^(i)(r,·)
-            Π̃^(i)(r,·) = e^{Δ_i r} (Π^(i)(r,·) + Δ_i Φ^(i)(r,·))
+            Φ̃^(i)(r,·) = e^{(d-Δ_i) r} Φ^(i)(r,·)
+            Π̃^(i)(r,·) = e^{(d-Δ_i) r} (Π^(i)(r,·) + (d-Δ_i) Φ^(i)(r,·))
 
         The UV-stabilized variables are O(1) near the boundary (r → ∞)
         rather than decaying exponentially.
@@ -357,9 +353,9 @@ class BulkField(nn.Module):
             r.to(device=phi.device, dtype=phi.dtype), phi.ndim
         )
 
-        scale = torch.exp(deltas * r_b)
+        scale = torch.exp((self.d - deltas) * r_b)
         phi_tilde = scale * phi
-        pi_tilde = scale * (pi + deltas * phi)
+        pi_tilde = scale * (pi + (self.d - deltas) * phi)
         return phi_tilde, pi_tilde
 
     def destabilize(
@@ -369,8 +365,8 @@ class BulkField(nn.Module):
         Inverse: map (Φ̃, Π̃) to physical (Φ, Π).
 
         Document eq (uv-stable-inverse):
-            Φ^(i)(r,·) = e^{-Δ_i r} Φ̃^(i)(r,·)
-            Π^(i)(r,·) = e^{-Δ_i r} (Π̃^(i)(r,·) - Δ_i Φ̃^(i)(r,·))
+            Φ^(i)(r,·) = e^{-(d-Δ_i) r} Φ̃^(i)(r,·)
+            Π^(i)(r,·) = e^{-(d-Δ_i) r} (Π̃^(i)(r,·) - (d-Δ_i) Φ̃^(i)(r,·))
 
         Args:
             phi_tilde: (B, C, *spatial) UV-stabilized field Φ̃
@@ -385,9 +381,9 @@ class BulkField(nn.Module):
             r.to(device=phi_tilde.device, dtype=phi_tilde.dtype), phi_tilde.ndim
         )
 
-        inv_scale = torch.exp(-deltas * r_b)
+        inv_scale = torch.exp(-(self.d - deltas) * r_b)
         phi = inv_scale * phi_tilde
-        pi = inv_scale * (pi_tilde - deltas * phi_tilde)
+        pi = inv_scale * (pi_tilde - (self.d - deltas) * phi_tilde)
         return phi, pi
 
 
@@ -405,6 +401,7 @@ def _bessel_k_nu(nu: float, x: Tensor, eps: float = 1e-10) -> Tensor:
     - ν = 1: torch.special.modified_bessel_k1 (if available)
     - ν = 0.5: Exact formula K_{0.5}(x) = sqrt(π/(2x)) e^{-x}
     - ν = 1.5: Exact formula K_{1.5}(x) = sqrt(π/(2x)) e^{-x} (1 + 1/x)
+    - ν = 2.5: Exact formula K_{2.5}(x) = sqrt(π/(2x)) e^{-x} (1 + 3/x + 3/x^2)
     - General ν: Uniform asymptotic expansion
 
     For numerical stability, returns 0 for very large x and uses
@@ -468,18 +465,23 @@ def _bessel_k_nu(nu: float, x: Tensor, eps: float = 1e-10) -> Tensor:
 
     else:
         # General case - use uniform asymptotic expansion
-        # K_ν(x) ≈ sqrt(π/(2x)) * e^{-x} * (1 + (4ν²-1)/(8x) + ...)
+        # K_ν(x) ≈ sqrt(π/(2x)) * e^{-x} * (1 + (4ν²-1)/(8x) + (16ν^4 - 40ν² + 9)/(128x^2) + ...)
         sqrt_term = torch.sqrt(math.pi / (2.0 * x_safe))
         exp_term = torch.exp(-x_safe)
 
-        # First-order correction
-        nu_sq = nu * nu
-        correction = 1.0 + (4.0 * nu_sq - 1.0) / (8.0 * x_safe)
+        # Correction up to 1/x^3 term
+        nu_sq = nu**2
+        nu_4 = nu**4
+        nu_6 = nu**6
 
-        result = sqrt_term * exp_term * correction
+        correction_1 = 1.0 + (4.0 * nu_sq - 1.0) / (8.0 * x_safe)
+        correction_2 = (16.0 * nu_4 - 40 * nu_sq + 9)/(128 * x_safe**2)
+        correction_3 = (64.0 * nu_6 - 560 * nu_4 + 1036 * nu_sq - 225)/(3072 * x_safe**3)
+
+        result = sqrt_term * exp_term * (correction_1 + correction_2 + correction_3)
 
         # For small x, use the power-law behavior K_ν(x) ~ (Γ(ν)/2)(2/x)^ν
-        small_x_mask = x_safe < 0.5
+        small_x_mask = x_safe < 0.7
         if small_x_mask.any() and nu > 0:
             gamma_nu = math.gamma(nu)
             small_x_approx = 0.5 * gamma_nu * torch.pow(2.0 / x_safe, nu)
@@ -504,11 +506,11 @@ def compute_spectral_envelope_planar(
     Compute Bessel-based spectral envelope for planar geometry.
 
     The UV-stabilized bulk-boundary propagator in Fourier space is:
-        κ̃_{|k|}(r) = (2/Γ(ν)) e^{νr} (|k|/2)^ν K_ν(|k|e^{-r})
+        κ̃_{|k|}(r) = (2/Γ(ν)) (e^{-r}|k|/2)^ν K_ν(|k|e^{-r})
 
     where ν = Δ - d/2 and ξ = |k|e^{-r} = |k|z.
 
-    This comes from the definition K̃ = e^{Δr} K applied to the unstabilized
+    This comes from the definition K̃ = e^{(d-Δ)r} K applied to the unstabilized
     propagator κ_{|k|}(r) = (2/Γ(ν)) e^{-dr/2} (|k|/2)^ν K_ν(ξ).
 
     Args:
@@ -531,11 +533,10 @@ def compute_spectral_envelope_planar(
     xi = k_mag * z_uv
     K_nu = _bessel_k_nu(nu, xi, eps=regularization)
 
-    # UV-stabilized propagator: K̃ = e^{Δr} K
-    # κ̃_{|k|}(r) = (2/Γ(ν)) e^{νr} (|k|/2)^ν K_ν(ξ)
-    prefactor = math.exp(nu * r_uv)
-    k_power = torch.pow(k_mag, nu)
-    envelope_phi_raw = prefactor * k_power * K_nu
+    # UV-stabilized propagator: K̃ = e^{(d-Δ)r} K
+    # κ̃_{|k|}(r) = (2/Γ(ν)) (ξ/2)^ν K_ν(ξ)
+    xi_power = torch.pow(xi, nu)
+    envelope_phi_raw =  xi_power * K_nu
 
     # Normalize so zero-mode has unit amplitude
     norm_val = envelope_phi_raw[0, 0].item()
@@ -545,9 +546,9 @@ def compute_spectral_envelope_planar(
         envelope_phi = envelope_phi_raw
 
     # Momentum envelope: Π̃ = ∂_r Φ̃
-    # ∂_r[e^{νr} |k|^ν K_ν(ξ)] = e^{νr} |k|^ν [2ν K_ν(ξ) + ξ K_{ν-1}(ξ)]
+    # ∂_r[ξ^ν K_ν(ξ)] = ξ^{ν+1} K_{ν-1}(ξ)
     K_nu_minus_1 = _bessel_k_nu(abs(nu - 1.0), xi, eps=regularization)
-    envelope_pi_raw = prefactor * k_power * (xi * K_nu_minus_1 + 2.0 * nu * K_nu)
+    envelope_pi_raw = xi_power * (xi * K_nu_minus_1)
 
     if abs(norm_val) > 1e-10:
         envelope_pi = envelope_pi_raw / norm_val
