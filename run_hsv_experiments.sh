@@ -61,7 +61,7 @@ N_VIZ=10000
 SEEDS=(42)
 
 # HSV p values covering the full range
-PLANAR_P_VALUES=(1.0)
+PLANAR_P_VALUES=(0.1 0.25 0.5 1.0)
 
 # Utility functions
 timestamp() {
