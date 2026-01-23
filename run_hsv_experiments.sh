@@ -146,6 +146,8 @@ run_baselines() {
         --dataset "$DATASET" \
         --slice_geometry flat \
         --deltas 2.0 \
+        --r_ir 1.0 \
+        --r_uv 0.1 \
         --path_type hermite \
         --use_spectral_encoding \
         --spectral_n_modes $SPECTRAL_MODES \
