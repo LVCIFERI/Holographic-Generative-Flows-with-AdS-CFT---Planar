@@ -51,7 +51,7 @@ usage() {
 }
 
 # Configuration
-OUTPUT_BASE="results/hsv_$(date +%Y%m%d_%H%M%S)"
+OUTPUT_BASE="outputs/hsv_$(date +%Y%m%d_%H%M%S)"
 SPECTRAL_MODES=16
 HIDDEN=64
 DEPTH=3
@@ -61,7 +61,7 @@ N_VIZ=10000
 SEEDS=(42)
 
 # HSV p values covering the full range
-PLANAR_P_VALUES=(0.1 0.25 0.5 1.0)
+PLANAR_P_VALUES=(1.0)
 
 # Utility functions
 timestamp() {
@@ -106,7 +106,7 @@ run_planar_hsv() {
     log "Planar HSV Experiments"
     log "============================================"
     log "Geometry: planar_hsv (valid: p ∈ [0, 1))"
-    log "p=0: flat, p→1: AdS"
+    log "p = 1: flat, p → 0: AdS"
     
     for P in "${PLANAR_P_VALUES[@]}"; do
         EXP_NAME="planar_hsv_p${P}_${DATASET}"
@@ -121,6 +121,7 @@ run_planar_hsv() {
             --slice_geometry planar_hsv \
             --hsv_p "$P" \
             --hsv_use_u_bounds \
+            --hsv_u_uv 0.3678794 \
             --path_type hermite \
             --use_spectral_encoding \
             --spectral_n_modes $SPECTRAL_MODES \
@@ -147,7 +148,7 @@ run_baselines() {
         --slice_geometry flat \
         --deltas 2.0 \
         --r_ir 1.0 \
-        --r_uv 0.1 \
+        --r_uv 0.3678794 \
         --path_type hermite \
         --use_spectral_encoding \
         --spectral_n_modes $SPECTRAL_MODES \
