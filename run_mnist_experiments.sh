@@ -34,7 +34,7 @@ set -e
 # =============================================================================
 # Hyperparameters (matching run_image_experiments.sh for MNIST)
 # =============================================================================
-EPOCHS=2000
+EPOCHS=1500
 BATCH_SIZE=128
 N_TRAIN=10000
 N_VIZ=10000
@@ -59,7 +59,7 @@ ODE_N_STEPS=100
 LIFT_NOISE_SIGMA=0.1
 
 # Seed configuration
-N_SEEDS=${N_SEEDS:-1}
+N_SEEDS=${N_SEEDS:-3}
 SAVE_ALL_WEIGHTS=${SAVE_ALL_WEIGHTS:-false}
 
 # Parallel execution configuration
