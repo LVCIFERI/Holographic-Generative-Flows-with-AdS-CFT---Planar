@@ -520,6 +520,9 @@ class FlowModelConfig:
     # Laplacian type selection
     laplacian_type: str = "diagonal"
 
+    # Vanilla CNN (FFT encoding, no propagator envelope, ancillary pi)
+    use_vanilla_cnn: bool = False
+
 
 # =============================================================================
 # Training Configuration
