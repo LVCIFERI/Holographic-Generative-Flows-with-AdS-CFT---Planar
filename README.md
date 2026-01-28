@@ -101,54 +101,53 @@ $$\Phi \sim e^{-(d-\Delta)r} J(x) + \frac{e^{-\Delta r}}{2\Delta - d} \langle O(
 
 To handle this numerically, we introduce **UV-stabilized variables** (paper eq. 18):
 
-$$\tilde{\Phi} = e^{\Delta r} \Phi$$
+$$\tilde{\Phi} = e^{(d-\Delta) r} \Phi$$
 
-$$\tilde{\Pi} = e^{\Delta r} (\Pi + \Delta \Phi)$$
+$$\tilde{\Pi} = e^{(d-\Delta) r} [\Pi + (d-\Delta) \Phi]$$
 
 These satisfy the **stabilized backbone equations**:
 
 $$\frac{\partial \tilde{\Phi}}{\partial r} = \tilde{\Pi}$$
 
-$$\frac{\partial \tilde{\Pi}}{\partial r} = \left(2\Delta - d\frac{f'}{f}\right) \tilde{\Pi} - \frac{1}{f^2} \hat{\Delta}_g \tilde{\Phi} + d\Delta\left(\frac{f'}{f} - 1\right) \tilde{\Phi}$$
+$$\frac{\partial \tilde{\Pi}}{\partial r} = \left[d-2\Delta - d\left(\frac{f'}{f}-1\right)\right] \tilde{\Pi} - \frac{1}{f^2} \hat{\Delta}_g \tilde{\Phi} + d(d-\Delta)\left(\frac{f'}{f} - 1\right) \tilde{\Phi}$$
 
-For **planar AdS** ($f'/f = 1$), this simplifies to (paper eqs. 20-21):
+For **planar AdS** ($f'/f = 1$), this simplifies to
 
 $$\frac{d\tilde{\phi}_k}{dr} = \tilde{\pi}_k$$
 
-$$\frac{d\tilde{\pi}_k}{dr} = |k|^2 e^{-2r} \tilde{\phi}_k - (d - 2\Delta) \tilde{\pi}_k$$
+$$\frac{d\tilde{\pi}_k}{dr} = |k|^2 e^{-2r} \tilde{\phi}_k + (d - 2\Delta) \tilde{\pi}_k$$
 
 ### Bulk-Boundary Propagator
 
-The bulk-boundary propagator $K(r,x;x')$ solves Klein-Gordon with delta-function boundary conditions. In Fourier space, the UV-stabilized mode coefficients are (paper eq. 22):
+The bulk-boundary propagator $K(r,x;x')$ solves Klein-Gordon with delta-function boundary conditions. In Fourier space, the UV-stabilized mode coefficients are
 
-$$\tilde{\kappa}_{|k|}(r) = \frac{2}{\Gamma(\nu)} \left(\frac{|k| e^r}{2}\right)^\nu K_\nu(|k| e^{-r})$$
+$$\tilde{\kappa}_{|k|}(r) = \frac{2}{\Gamma(\nu)} \left(\frac{|k| e^{-r}}{2}\right)^\nu K_\nu(|k| e^{-r})$$
 
 where $\nu = \Delta - d/2$ and $K_\nu$ is the modified Bessel function of the second kind.
 
 ### Hyperscaling-Violating Geometries
 
-HSV geometries (paper Section 5) form a one-parameter family interpolating between flat space and AdS.
-
-**Note on conventions:** The code uses $p \in [0, 1)$ where $p=0$ is flat and $p \to 1$ is AdS. This is **inverted** from the paper's convention.
+HSV geometries (paper Appendix A) form a one-parameter family interpolating between flat space and AdS.
 
 **Warp factor:**
-$$f(r) = [(1-p)r]^{-p/(1-p)}$$
+$$f(r) = (p r)^{-(1-p)/p}$$
 
 **HSV coordinate:** The natural radial coordinate appearing in the propagator is:
-$$u = [(1-p)r]^{1/(1-p)}$$
 
-which satisfies $u = r$ when $p=0$ (flat) and approaches $u \to e^{-r} = z$ (Poincaré coordinate) as $p \to 1$.
+$$u = (pr)^{1/p}$$
+
+which satisfies $u = r$ when $p=1$ (flat) and approaches $u \to e^{-r}$ (Poincaré coordinate) as $p \to 0$ (AdS).
 
 **Bulk-boundary propagator:** In Fourier space, the HSV propagator has a unified Bessel form (paper eq. 47):
 
-$$\hat{K}(u, k) = \frac{(|k| u)^\beta K_\beta(|k| u)}{2^{\beta-1} \Gamma(\beta)}$$
+$$\hat{K}(u, k) = \frac{(|k|u)^\beta K_\beta(|k|u)}{2^{\beta-1} \Gamma(\beta)}$$
 
 where the **Bessel order** is:
-$$\beta = \frac{1 + (d-1)p}{2}$$
+$$\beta = \frac{1 + (d-1)(1-p)}{2}$$
 
 **Limiting cases:**
-- $p = 0$: $\beta = 1/2$, $\hat{K} = e^{-|k|r}$ (flat space Green's function)
-- $p \to 1$: $\beta \to d/2$, $\hat{K} \to (|k|z)^{d/2} K_{d/2}(|k|z)$ (standard AdS propagator)
+- $p = 1$: $\beta = 1/2$, $\hat{K} = e^{-|k|r}$ (flat space Green's function)
+- $p \to 0$: $\beta \to d/2$, $\hat{K} \to (|k|z)^{d/2} K_{d/2}(|k|z)$ (standard AdS propagator)
 
 ### Flow Matching Paths
 
@@ -340,7 +339,7 @@ python train.py [options]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--hsv_p` | `0.5` | HSV parameter p ∈ [0, 1): p=0 flat, p→1 AdS |
+| `--hsv_p` | `0.5` | HSV parameter p ∈ (0, 1]: p=1 flat, p→0 AdS |
 | `--hsv_use_u_bounds` | `True` | Use natural HSV u-coordinates for bounds |
 | `--hsv_u_uv` | `0.1` | HSV u at UV boundary |
 | `--hsv_u_ir` | `1.0` | HSV u at IR boundary |
@@ -407,7 +406,7 @@ GeometryConfig(
 GeometryConfig(
     slice_geometry=SliceGeometry.HYPERSCALING_VIOLATING,
     d=2,
-    hsv_p=0.5,  # 0=flat, 1=AdS
+    hsv_p=0.5,  # 0=AdS, 1=flat
     hsv_use_u_bounds=True,
     hsv_u_uv=0.1,
     hsv_u_ir=1.0,
@@ -474,14 +473,14 @@ python train.py --slice_geometry flat
 
 ### Hyperscaling-Violating (HSV)
 
-Interpolates between flat space and AdS via parameter $p \in [0, 1)$.
+Interpolates between flat space and AdS via parameter $p \in (0, 1]$.
 
-**Warp factor:** $f(r) = [(1-p)r]^{-p/(1-p)}$
+**Warp factor:** $f(r) = (pr)^{-(1-p)/p}$
 
 **Properties:**
-- $p = 0$: flat space ($f = 1$)
-- $p \to 1$: recovers AdS ($f \to e^r$)
-- Bessel-based propagator with order $\beta = (1 + (d-1)p)/2$
+- $p = 1$: flat space ($f = 1$)
+- $p \to 0$: recovers AdS ($f \to e^r$)
+- Bessel-based propagator with order $\beta = (1 + (d-1)(1-p))/2$
 
 **Usage:**
 ```bash
@@ -516,7 +515,7 @@ Encodes boundary data into spectral (Fourier) bulk fields using the holographic 
 $$\hat{\Phi}(r, k) = \hat{K}_\Delta(r, k) \cdot \hat{\phi}_{boundary}(k)$$
 
 where $\hat{K}_\Delta$ is the UV-stabilized propagator:
-$$\hat{K}_\Delta(r, k) = \frac{2}{\Gamma(\nu)} e^{\nu r} \left(\frac{|k|}{2}\right)^\nu K_\nu(|k| e^{-r})$$
+$$\hat{K}_\Delta(r, k) = \frac{2}{\Gamma(\nu)} \left(\frac{|k|e^{-r}}{2}\right)^\nu K_\nu(|k| e^{-r})$$
 
 with $\nu = \Delta - d/2$.
 
