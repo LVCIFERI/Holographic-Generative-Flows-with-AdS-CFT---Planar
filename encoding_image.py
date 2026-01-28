@@ -592,8 +592,9 @@ class ImageSpectralEncoder(nn.Module):
         # Also store the ratio for backward compatibility
         # π/φ ratio at each k
         pi_phi_ratio = envelope_pi / (envelope_phi + 1e-10)
+
         self.register_buffer("pi_phi_ratio", pi_phi_ratio)
-        
+
         print(f"[DEBUG] ImageSpectralEncoder.__init__ complete", flush=True)
 
     def _compute_bessel_envelopes(
@@ -643,17 +644,17 @@ class ImageSpectralEncoder(nn.Module):
         xi_power = torch.pow(xi, nu)
         envelope_phi_raw = xi_power * K_nu
 
+        # Momentum envelope: Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ) = ∂_r Φ̃
+        # ∂_r[ξ^ν K_ν(ξ)] where ξ = |k|e^{-r}
+        # = ξ^{ν+1} K_{ν-1}(ξ)
+        envelope_pi_raw = xi_power * xi * K_nu_minus_1
+
         # Normalize so that envelope_phi[0, 0] = 1 (k=0 mode)
         norm_val = envelope_phi_raw[0, 0].item()
         if abs(norm_val) > 1e-10:
             envelope_phi = envelope_phi_raw / norm_val
         else:
             envelope_phi = envelope_phi_raw
-
-        # Momentum envelope: Π̃ = e^{(d-Δ)r}(Π + (d-Δ)Φ) = ∂_r Φ̃
-        # ∂_r[ξ^ν K_ν(ξ)] where ξ = |k|e^{-r}
-        # = ξ^{ν+1} K_{ν-1}(ξ)
-        envelope_pi_raw = xi_power * xi * K_nu_minus_1
 
         if abs(norm_val) > 1e-10:
             envelope_pi = envelope_pi_raw / norm_val
@@ -954,7 +955,6 @@ class ImageSpectralCodec(nn.Module):
     def get_laplacian(self) -> ImageSpectralLaplacian:
         """Return the spectral Laplacian operator."""
         return self.laplacian
-
 
 # =============================================================================
 # Utility Functions
