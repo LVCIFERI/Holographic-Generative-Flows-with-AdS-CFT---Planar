@@ -136,46 +136,6 @@ run_planar_hsv() {
     done
 }
 
-run_baselines() {
-    log "============================================"
-    log "Baseline Comparisons"
-    log "============================================"
-    
-    # Flat baseline (no AdS structure)
-    log "Running flat baseline..."
-    run_with_seeds "flat_${DATASET}" "${OUTPUT_BASE}/baselines/flat_${DATASET}" \
-        --dataset "$DATASET" \
-        --slice_geometry flat \
-        --deltas 2.0 \
-        --r_ir 1.0 \
-        --r_uv 0.3678794 \
-        --path_type hermite \
-        --use_spectral_encoding \
-        --spectral_n_modes $SPECTRAL_MODES \
-        --cnn_hidden $HIDDEN \
-        --cnn_depth $DEPTH \
-        --epochs $EPOCHS \
-        --batch_size $BATCH_SIZE \
-        --n_train $N_TRAIN \
-        --n_viz_gen $N_VIZ
-    
-    # Planar AdS baseline
-    log "Running planar AdS baseline..."
-    run_with_seeds "planar_ads_${DATASET}" "${OUTPUT_BASE}/baselines/planar_ads_${DATASET}" \
-        --dataset "$DATASET" \
-        --slice_geometry planar \
-        --deltas 2.0 \
-        --path_type hermite \
-        --use_spectral_encoding \
-        --spectral_n_modes $SPECTRAL_MODES \
-        --cnn_hidden $HIDDEN \
-        --cnn_depth $DEPTH \
-        --epochs $EPOCHS \
-        --batch_size $BATCH_SIZE \
-        --n_train $N_TRAIN \
-        --n_viz_gen $N_VIZ
-}
-
 # Main entry point
 main() {
     log "============================================"
@@ -190,9 +150,6 @@ main() {
     
     # Run planar HSV experiments
     run_planar_hsv
-    
-    # Run baselines
-    run_baselines
     
     log "============================================"
     log "ALL HSV EXPERIMENTS COMPLETED"
