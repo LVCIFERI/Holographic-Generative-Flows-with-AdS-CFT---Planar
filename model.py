@@ -655,16 +655,22 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         self, config: FlowModelConfig, data_shape: Tuple[int, ...], dtype: torch.dtype
     ) -> None:
         """
-        Set up vanilla CNN encoding for flow matching baseline.
-        
+        Set up vanilla flow matching baseline in Fourier/phase space.
+
         This is a non-physics baseline that:
-        - Takes raw images directly (no FFT, no bulk-boundary propagator)
-        - Uses CNN architecture on pixel space
-        - Does vanilla linear flow matching
-        
-        The "phi_tilde" channel holds the raw image.
-        The "pi_tilde" channel holds zeros (or noise for regularization).
+        - Uses FFT to encode images to Fourier modes (NO propagator envelope)
+        - Pi is ancillary noise sampled from prior (NOT derived from data)
+        - Does vanilla linear flow matching in phase space
+
+        Comparison with physics-based IMAGE encoding:
+        - IMAGE: phi = K̂(k) × FFT(image), pi = ∂_r K̂(k) × FFT(image)
+        - VANILLA: phi = FFT(image), pi = noise (ancillary)
+
+        The "phi_tilde" channel holds the direct Fourier coefficients.
+        The "pi_tilde" channel holds ancillary noise from the prior.
         """
+        from ads_cft.encoding_image import ImageSpectralLaplacian
+
         print("[DEBUG] Starting VANILLA_CNN encoding setup...", flush=True)
 
         # Determine image shape
@@ -678,27 +684,36 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             raise ValueError(f"Cannot determine image shape from data_shape={data_shape}")
 
         C, H, W = image_shape
-        print(f"[VANILLA_CNN] Using raw image encoding (no physics)", flush=True)
-        print(f"[VANILLA_CNN] Image shape: {C}×{H}×{W}", flush=True)
+        print(f"[VANILLA] Using direct FFT encoding (no propagator envelope)", flush=True)
+        print(f"[VANILLA] Image shape: {C}×{H}×{W}", flush=True)
+        print(f"[VANILLA] phi = FFT(image), pi = ancillary noise", flush=True)
 
         self.d = 2
         self.n_channels = C
         self._vanilla_image_shape = (C, H, W)
         self._vanilla_noise_sigma = config.lift_noise_sigma
 
-        # Discretization config (for compatibility)
+        # Precompute wave numbers for FFT (matching ImageSpectralEncoder)
+        kx = torch.fft.fftfreq(H) * 2 * torch.pi
+        ky = torch.fft.fftfreq(W) * 2 * torch.pi
+        KX, KY = torch.meshgrid(kx, ky, indexing="ij")
+        k_sq = KX ** 2 + KY ** 2
+
+        self.register_buffer("_vanilla_k_sq", k_sq.clone())
+
+        # Discretization config (spectral representation)
         self.disc = DiscretizationConfig(
-            representation="physical",
+            representation="spectral",
             grid_shape=(H, W),
-            box_lengths=(1.0, 1.0),
+            box_lengths=(float(H), float(W)),
         )
 
-        # Slice operator is None for vanilla (no Laplacian needed)
-        self.slice_op = None
+        # Spectral Laplacian for Sobolev prior (diagonal in Fourier space)
+        self.slice_op = ImageSpectralLaplacian(k_sq)
 
-        # Field shape: 2*C channels for (phi, pi) structure
-        # Using 2*C to maintain compatibility with CNN architecture
+        # Field shape: 2*C channels for real/imag interleaved (like IMAGE encoding)
         self.field_shape = (2 * C, H, W)
+        self.image_shape = image_shape
         self.is_point_data = False
         self.point_field_codec = None
         self.holographic_codec = None
@@ -1011,7 +1026,8 @@ class UVStabilizedFlowMatchingModel(nn.Module):
                     print(f"[DEBUG] ResidualVelocityNet2D created successfully", flush=True)
                     
                 elif self.encoding_type == FieldEncodingType.VANILLA_CNN:
-                    in_ch = self.n_channels
+                    # Vanilla uses FFT: phi has 2*C channels (real/imag interleaved)
+                    in_ch = 2 * self.n_channels
                     print(f"[DEBUG] Using 2D CNN for vanilla flow matching ({in_ch} input channels)", flush=True)
                     
                     cnn_hidden = config.residual_hidden if config.residual_hidden is not None else config.cnn_hidden
@@ -1142,10 +1158,13 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         cfg = self.config
 
         # Determine number of channels
+        # Spectral/image/vanilla encodings use 2*C for real/imag interleaved
         if hasattr(self, "_spectral_encoding") and self._spectral_encoding:
             n_ch = 2 * self.n_channels
         elif hasattr(self, "_image_encoding") and self._image_encoding:
             n_ch = 2 * self.n_channels
+        elif hasattr(self, "_vanilla_cnn") and self._vanilla_cnn:
+            n_ch = 2 * self.n_channels  # Vanilla also uses FFT (real/imag)
         else:
             n_ch = self.n_channels
 
@@ -1214,19 +1233,38 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             BulkState at UV boundary
         """
         if self.encoding_type == FieldEncodingType.VANILLA_CNN:
-            # Vanilla CNN: raw images, no physics
+            # Vanilla flow matching in Fourier/phase space:
+            #   phi_tilde = FFT(image) - direct Fourier modes, NO propagator envelope
+            #   pi_tilde = noise - ancillary information from prior
+            #
+            # This differs from IMAGE encoding which applies propagator envelopes:
+            #   IMAGE: phi = K̂(k) × FFT(image), pi = ∂_r K̂(k) × FFT(image)
+            #   VANILLA: phi = FFT(image), pi = noise
+            #
             # y is (B, C, H, W) or (B, H, W)
             if y.ndim == 3:
                 y = y.unsqueeze(1)  # (B, H, W) -> (B, 1, H, W)
-            
-            phi = y  # Raw image as phi
-            pi = torch.zeros_like(y)  # Zero momentum (vanilla flow matching)
-            
-            # Add small noise for regularization if needed
-            noise_sigma = getattr(self, '_vanilla_noise_sigma', 0.0)
-            if noise_sigma > 0:
-                pi = noise_sigma * torch.randn_like(pi)
-            
+
+            B, C, H, W = y.shape
+
+            # Apply 2D FFT to get Fourier modes (no propagator envelope)
+            y_hat_complex = torch.fft.fft2(y, norm="ortho")
+
+            # Split into real and imaginary, interleave channels
+            # Output shape: (B, 2*C, H, W) - matching IMAGE encoding format
+            phi_real = y_hat_complex.real  # (B, C, H, W)
+            phi_imag = y_hat_complex.imag  # (B, C, H, W)
+            phi = torch.stack([phi_real, phi_imag], dim=2).view(B, 2 * C, H, W)
+
+            # Pi is ancillary noise (same shape as phi)
+            noise_sigma = getattr(self, '_vanilla_noise_sigma', 0.1)
+            if generator is not None:
+                pi = noise_sigma * torch.randn(
+                    phi.shape, device=phi.device, dtype=phi.dtype, generator=generator
+                )
+            else:
+                pi = noise_sigma * torch.randn_like(phi)
+
             return BulkState(phi_tilde=phi, pi_tilde=pi)
 
         elif self.encoding_type == FieldEncodingType.IMAGE:
@@ -1299,8 +1337,21 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             Generated data
         """
         if self.encoding_type == FieldEncodingType.VANILLA_CNN:
-            # Vanilla CNN: return phi directly, clipped to [0, 1]
-            return state.phi_tilde.clamp(0, 1)
+            # Vanilla: decode FFT coefficients back to image space
+            # phi_tilde is (B, 2*C, H, W) with real/imag interleaved
+            phi = state.phi_tilde
+            B = phi.shape[0]
+            C = self.n_channels
+            H, W = phi.shape[2], phi.shape[3]
+
+            # Reshape to (B, C, 2, H, W) then combine real/imag
+            phi_ri = phi.view(B, C, 2, H, W)
+            phi_complex = torch.complex(phi_ri[:, :, 0], phi_ri[:, :, 1])
+
+            # Inverse FFT to get image
+            y_gen = torch.fft.ifft2(phi_complex, norm="ortho").real
+
+            return y_gen
         elif self.encoding_type == FieldEncodingType.IMAGE:
             return self.image_codec.decode(state.phi_tilde)
         elif self.encoding_type == FieldEncodingType.SPECTRAL:
@@ -1562,7 +1613,7 @@ class UVStabilizedFlowMatchingModel(nn.Module):
         return y_gen
 
     # =========================================================================
-    # Exact Log-Likelihood and BPD (Bits Per Dimension)
+    # Exact Log-Likelihood and BPM (Bits Per Mode)
     # =========================================================================
 
     def compute_log_likelihood(
@@ -1768,19 +1819,19 @@ class UVStabilizedFlowMatchingModel(nn.Module):
 
         return log_prob_phi + log_prob_pi
 
-    def compute_bpd(
+    def compute_bpm(
         self,
         data: Tensor,
         n_hutchinson_samples: int = 1,
     ) -> Tuple[Tensor, Dict[str, Tensor]]:
         """
-        Compute bits per dimension (BPD) for exact likelihood evaluation.
+        Compute bits per mode (BPM) for exact likelihood evaluation.
 
-        BPD = -log₂ p(x) / D = -log p(x) / (D × log(2))
+        BPM = -log₂ p(x) / D = -log p(x) / (D × log(2))
 
-        Lower BPD indicates higher likelihood (better model fit).
+        Lower BPM indicates higher likelihood (better model fit).
 
-        Note: For phase-space flows, we compute BPD in the latent space.
+        Note: For phase-space flows, we compute BPM in the latent space.
         The dimension D is the full phase space dimension (φ + π).
 
         Args:
@@ -1788,26 +1839,27 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             n_hutchinson_samples: Number of random vectors for trace estimation
 
         Returns:
-            bpd: (B,) bits per dimension for each sample
+            bpm: (B,) bits per mode for each sample
             info: Dict with 'log_likelihood', 'log_prior', 'log_det_jacobian'
         """
         log_likelihood, log_prior, log_det_jacobian = self.compute_log_likelihood(
             data, n_hutchinson_samples=n_hutchinson_samples
         )
 
-        # Compute phase space dimension (φ + π)
-        # This is the dimension over which log_prior is computed
+        # Compute phase space dimension
+        # For FFT encoding: phi_tilde has shape (2*C, H, W) with real/imag interleaved
+        # We normalize by complex phase space dim = 2 * H * W (phi + pi as complex modes)
         state_uv = self.lift_data(data[:1])  # Get shape from single sample
-        D_phi = state_uv.phi_tilde[0].numel()
+        D_phi = state_uv.phi_tilde[0].numel()  # 2*C*H*W for FFT (real representation)
         D_pi = state_uv.pi_tilde[0].numel()
-        D_phase_space = D_phi + D_pi
-        
+
         # Also store data dimension for reference
         D_data = data[0].numel()
 
-        # BPD = -log p(x) / (D × log(2))
-        # Use phase space dimension for consistency with log_prior
-        bpd = -log_likelihood / (D_phase_space * math.log(2))
+        # BPM normalized by complex phase space dimension (2*H*W for images)
+        # D_phi already equals 2*H*W, so use that directly
+        D_phase_space = D_phi  # = 2*28*28 = 1568 for MNIST
+        bpm = -log_likelihood / (D_phase_space * math.log(2))
 
         info = {
             "log_likelihood": log_likelihood,
@@ -1817,7 +1869,7 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             "phase_space_dimension": D_phase_space,
         }
 
-        return bpd, info
+        return bpm, info
 
     # =========================================================================
     # Training Loss (Document Algorithm 1, Section 9, eq fm-loss)
