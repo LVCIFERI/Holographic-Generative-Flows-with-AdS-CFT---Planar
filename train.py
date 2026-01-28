@@ -79,7 +79,7 @@ from ads_cft.data_image import (
     create_image_dataloaders,
 )
 from ads_cft.utils import set_seed, count_parameters
-from ads_cft.metrics import compute_metrics, compute_bpd_from_model
+from ads_cft.metrics import compute_metrics, compute_bpm_from_model
 from ads_cft.visualization import visualize_samples, plot_2d_samples, plot_image_samples, save_clean_data, save_generated_only
 
 
@@ -665,19 +665,27 @@ def create_model(
     print("[DEBUG] create_model() started", flush=True)
     
     # Compute data dimension and handle image vs point data
-    if config.use_image_encoding and len(data_shape) == 3:
+    # Check for image data: use_image_encoding OR use_vanilla_cnn with 3D shape
+    is_image_data = (config.use_image_encoding or getattr(config, 'use_vanilla_cnn', False)) and len(data_shape) == 3
+
+    if is_image_data:
         # Image data: shape is (C, H, W)
         n_image_channels = data_shape[0]
         image_height = data_shape[1]
         image_width = data_shape[2]
-        
+
         # For images, d = 2 always (2D spatial boundary)
         d = 2
         data_dim = n_image_channels  # For deltas matching
-        
-        print(f"[IMAGE] Image shape: {n_image_channels}×{image_height}×{image_width}", flush=True)
-        print(f"[IMAGE] Boundary dimension d = 2 (2D image plane)", flush=True)
-        print(f"[IMAGE] Number of field channels: {n_image_channels}", flush=True)
+
+        if getattr(config, 'use_vanilla_cnn', False):
+            print(f"[VANILLA] Image shape: {n_image_channels}×{image_height}×{image_width}", flush=True)
+            print(f"[VANILLA] Boundary dimension d = 2 (2D image plane)", flush=True)
+            print(f"[VANILLA] Using FFT encoding with ancillary pi (no propagator)", flush=True)
+        else:
+            print(f"[IMAGE] Image shape: {n_image_channels}×{image_height}×{image_width}", flush=True)
+            print(f"[IMAGE] Boundary dimension d = 2 (2D image plane)", flush=True)
+            print(f"[IMAGE] Number of field channels: {n_image_channels}", flush=True)
     else:
         # Point data: compute flat dimension
         data_dim = 1
@@ -703,7 +711,20 @@ def create_model(
     # Determine if we're using any field encoding
     using_grid_encoding = config.use_field_encoding or config.use_holographic_grid
     
-    if config.use_image_encoding:
+    if getattr(config, 'use_vanilla_cnn', False) and len(data_shape) == 3:
+        # Vanilla CNN for images: FFT encoding, no propagator envelope
+        n_image_channels = data_shape[0]
+        print(f"Vanilla flow matching (FFT): {n_image_channels} image channels", flush=True)
+        print(f"  phi = FFT(image), pi = ancillary noise", flush=True)
+        print(f"  Laplacian: DIAGONAL (spectral)", flush=True)
+        if n_deltas < n_image_channels:
+            base_delta = deltas[0]
+            deltas = tuple([base_delta] * n_image_channels)
+            print(f"  Auto-expanded deltas to {n_image_channels} channels: {deltas}", flush=True)
+        elif n_deltas > n_image_channels:
+            deltas = deltas[:n_image_channels]
+            print(f"  Truncated deltas to {n_image_channels} channels: {deltas}", flush=True)
+    elif config.use_image_encoding:
         # For images, deltas must match number of image channels
         n_image_channels = data_shape[0] if len(data_shape) == 3 else 1
         print(f"Image encoding (DIRECT FFT): {n_image_channels} image channels", flush=True)
@@ -877,7 +898,9 @@ def create_model(
         holographic_normalize=config.holographic_normalize,
         # Image encoding
         use_image_encoding=config.use_image_encoding,
-        image_shape=data_shape if config.use_image_encoding and len(data_shape) == 3 else None,
+        image_shape=data_shape if (config.use_image_encoding or getattr(config, 'use_vanilla_cnn', False)) and len(data_shape) == 3 else None,
+        # Vanilla CNN (FFT encoding, no propagator envelope)
+        use_vanilla_cnn=getattr(config, 'use_vanilla_cnn', False),
     )
     
     print("[DEBUG] ModelConfig created, now creating UVStabilizedFlowMatchingModel...", flush=True)
@@ -906,9 +929,9 @@ def evaluate_model(
     save_dir: Optional[str] = None,
     checkerboard_config: Optional[Dict] = None,
     model_type: str = "AdS",
-    compute_bpd: bool = False,
-    bpd_n_samples: int = 100,
-    bpd_n_hutchinson: int = 1,
+    compute_bpm: bool = False,
+    bpm_n_samples: int = 100,
+    bpm_n_hutchinson: int = 1,
 ) -> Dict[str, float]:
     """
     Evaluate model by generating samples.
@@ -924,9 +947,9 @@ def evaluate_model(
         save_dir: Directory to save visualizations
         checkerboard_config: If provided, compute checkerboard-specific metrics (BV, JS_cell, WED, CQS)
         model_type: Model type for visualization title (e.g., "AdS", "NoKG", "Vanilla")
-        compute_bpd: If True, compute bits per dimension (exact log-likelihood)
-        bpd_n_samples: Number of samples for BPD computation
-        bpd_n_hutchinson: Number of Hutchinson samples for trace estimation
+        compute_bpm: If True, compute bits per mode (exact log-likelihood)
+        bpm_n_samples: Number of samples for BPM computation
+        bpm_n_hutchinson: Number of Hutchinson samples for trace estimation
         
     Returns:
         Dict of evaluation metrics
@@ -1041,35 +1064,35 @@ def evaluate_model(
         except Exception as e:
             print(f"[WARNING] Metrics computation failed: {e}")
     
-    # Compute BPD (bits per dimension) if requested
-    # NOTE: BPD computation needs gradients for Hutchinson trace estimator, 
+    # Compute BPM (bits per mode) if requested
+    # NOTE: BPM computation needs gradients for Hutchinson trace estimator,
     # so it's outside torch.no_grad() context
-    if compute_bpd and real_data is not None:
+    if compute_bpm and real_data is not None:
         try:
-            print(f"[EVAL] Computing BPD with {bpd_n_samples} samples, {bpd_n_hutchinson} Hutchinson samples...")
-            
+            print(f"[EVAL] Computing BPM with {bpm_n_samples} samples, {bpm_n_hutchinson} Hutchinson samples...")
+
             # Create a simple dataloader from real_data
             from torch.utils.data import TensorDataset, DataLoader
-            bpd_data = real_data[:bpd_n_samples].to(device)
-            bpd_dataset = TensorDataset(bpd_data)
-            bpd_loader = DataLoader(bpd_dataset, batch_size=min(32, bpd_n_samples), shuffle=False)
-            
-            bpd_metrics = compute_bpd_from_model(
+            bpm_data = real_data[:bpm_n_samples].to(device)
+            bpm_dataset = TensorDataset(bpm_data)
+            bpm_loader = DataLoader(bpm_dataset, batch_size=min(32, bpm_n_samples), shuffle=False)
+
+            bpm_metrics = compute_bpm_from_model(
                 model=model,
-                data_loader=bpd_loader,
-                n_hutchinson_samples=bpd_n_hutchinson,
+                data_loader=bpm_loader,
+                n_hutchinson_samples=bpm_n_hutchinson,
                 device=device,
             )
-            
-            metrics["bpd"] = bpd_metrics["bpd"]
-            metrics["bpd_std"] = bpd_metrics["bpd_std"]
-            metrics["log_likelihood"] = bpd_metrics["log_likelihood"]
-            metrics["log_prior"] = bpd_metrics["log_prior"]
-            metrics["log_det_jacobian"] = bpd_metrics["log_det_jacobian"]
-            metrics["bpd_n_samples"] = bpd_metrics["n_samples"]
-            
-            print(f"[EVAL] BPD: {bpd_metrics['bpd']:.4f} ± {bpd_metrics['bpd_std']:.4f}")
-            print(f"[EVAL] Log-likelihood: {bpd_metrics['log_likelihood']:.4f}")
+
+            metrics["bpm"] = bpm_metrics["bpm"]
+            metrics["bpm_std"] = bpm_metrics["bpm_std"]
+            metrics["log_likelihood"] = bpm_metrics["log_likelihood"]
+            metrics["log_prior"] = bpm_metrics["log_prior"]
+            metrics["log_det_jacobian"] = bpm_metrics["log_det_jacobian"]
+            metrics["bpm_n_samples"] = bpm_metrics["n_samples"]
+
+            print(f"[EVAL] BPM: {bpm_metrics['bpm']:.4f} ± {bpm_metrics['bpm_std']:.4f}")
+            print(f"[EVAL] Log-likelihood: {bpm_metrics['log_likelihood']:.4f}")
             
             # Update JSON file with BPD metrics
             if save_dir is not None:
@@ -1175,12 +1198,14 @@ def train(config: ExperimentConfig) -> Dict[str, Any]:
         logger.info(f"[IMAGE] Channels: {img_info['n_channels']}, Size: {img_info['height']}×{img_info['width']}")
         logger.info(f"[IMAGE] Classes: {img_info['n_classes']}, Boundary dim: d={img_info['d']}")
         
-        # Auto-enable image encoding if not already set
-        if not config.use_image_encoding:
+        # Auto-enable image encoding if not already set (unless using vanilla CNN)
+        if not config.use_image_encoding and not getattr(config, 'use_vanilla_cnn', False):
             logger.info("[IMAGE] Auto-enabling image encoding (use_image_encoding=True)")
             config = ExperimentConfig(
                 **{**asdict(config), "use_image_encoding": True}
             )
+        elif getattr(config, 'use_vanilla_cnn', False):
+            logger.info("[VANILLA] Using vanilla flow matching (FFT, no propagator envelope)")
         
         # Use smaller viz batch for images (64 for 8x8 grid)
         if config.n_viz_real > 64:
@@ -1331,9 +1356,9 @@ def train(config: ExperimentConfig) -> Dict[str, Any]:
                 save_dir=str(samples_dir),
                 checkerboard_config=checkerboard_config,
                 model_type=model_type,
-                compute_bpd=True,  # Enable BPD computation
-                bpd_n_samples=min(100, len(real_data_for_viz)) if real_data_for_viz is not None else 50,
-                bpd_n_hutchinson=1,
+                compute_bpm=True,  # Enable BPM computation
+                bpm_n_samples=min(100, len(real_data_for_viz)) if real_data_for_viz is not None else 50,
+                bpm_n_hutchinson=1,
             )
             if "sample_plot_path" in eval_metrics:
                 logger.info(f"Saved visualization to {eval_metrics['sample_plot_path']}")
@@ -1364,9 +1389,9 @@ def train(config: ExperimentConfig) -> Dict[str, Any]:
         save_dir=str(samples_dir),
         checkerboard_config=checkerboard_config,
         model_type=model_type,
-        compute_bpd=True,  # Enable BPD computation for final evaluation
-        bpd_n_samples=min(500, len(real_data_for_viz)) if real_data_for_viz is not None else 100,
-        bpd_n_hutchinson=1,
+        compute_bpm=True,  # Enable BPM computation for final evaluation
+        bpm_n_samples=min(500, len(real_data_for_viz)) if real_data_for_viz is not None else 100,
+        bpm_n_hutchinson=1,
     )
     results["final_eval"] = final_metrics
     
@@ -1498,9 +1523,9 @@ def train(config: ExperimentConfig) -> Dict[str, Any]:
         if 'CQS' in final_metrics:
             logger.info(f"Final CQS: {final_metrics['CQS']:.6f}")
     
-    # Log BPD if computed
-    if 'bpd' in final_metrics:
-        logger.info(f"Final BPD (bits per dimension): {final_metrics['bpd']:.4f} ± {final_metrics.get('bpd_std', 0):.4f}")
+    # Log BPM if computed
+    if 'bpm' in final_metrics:
+        logger.info(f"Final BPM (bits per mode): {final_metrics['bpm']:.4f} ± {final_metrics.get('bpm_std', 0):.4f}")
         logger.info(f"Final Log-likelihood: {final_metrics.get('log_likelihood', 'N/A')}")
     
     return results
@@ -1577,7 +1602,7 @@ def parse_args() -> argparse.Namespace:
     
     # UV lift
     parser.add_argument("--lift_noise_sigma", type=float, default=None, help="Lift noise σ")
-    
+
     # Path
     parser.add_argument(
         "--path_type", type=str, default=None,
