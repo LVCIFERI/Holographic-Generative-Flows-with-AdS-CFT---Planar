@@ -1409,11 +1409,11 @@ def compute_log_likelihood_estimate(
 
 
 # =============================================================================
-# Bits Per Dimension (BPD) - Exact Likelihood Evaluation
+# Bits Per Mode (BPM) - Exact Likelihood Evaluation
 # =============================================================================
 
 
-def compute_bpd_from_model(
+def compute_bpm_from_model(
     model: "UVStabilizedFlowMatchingModel",
     data_loader: torch.utils.data.DataLoader,
     n_hutchinson_samples: int = 1,
@@ -1421,12 +1421,12 @@ def compute_bpd_from_model(
     device: Optional[torch.device] = None,
 ) -> Dict[str, float]:
     """
-    Compute bits per dimension (BPD) using exact log-likelihood.
+    Compute bits per mode (BPM) using exact log-likelihood.
 
-    BPD measures how many bits are needed on average to encode each dimension
-    of the data under the model. Lower is better.
+    BPM measures how many bits are needed on average to encode each spectral
+    mode under the model. Lower is better.
 
-    BPD = -log₂ p(x) / D = -log p(x) / (D × log(2))
+    BPM = -log₂ p(x) / D = -log p(x) / (D × log(2))
 
     This uses the change of variables formula for continuous normalizing flows:
         log p(x) = log p(z) - ∫ div(v(z, r)) dr
@@ -1442,19 +1442,19 @@ def compute_bpd_from_model(
 
     Returns:
         Dict containing:
-            - 'bpd': Mean bits per dimension
-            - 'bpd_std': Standard deviation of BPD
+            - 'bpm': Mean bits per mode
+            - 'bpm_std': Standard deviation of BPM
             - 'log_likelihood': Mean log likelihood
             - 'log_prior': Mean log prior
             - 'log_det_jacobian': Mean log det Jacobian
             - 'n_samples': Number of samples evaluated
     """
     model.eval()
-    
+
     if device is None:
         device = next(model.parameters()).device
 
-    all_bpd = []
+    all_bpm = []
     all_log_likelihood = []
     all_log_prior = []
     all_log_det_jacobian = []
@@ -1473,35 +1473,35 @@ def compute_bpd_from_model(
 
         data = data.to(device)
 
-        # Compute BPD for this batch
-        bpd, info = model.compute_bpd(
+        # Compute BPM for this batch
+        bpm, info = model.compute_bpm(
             data, n_hutchinson_samples=n_hutchinson_samples
         )
 
-        all_bpd.append(bpd.cpu())
+        all_bpm.append(bpm.cpu())
         all_log_likelihood.append(info["log_likelihood"].cpu())
         all_log_prior.append(info["log_prior"].cpu())
         all_log_det_jacobian.append(info["log_det_jacobian"].cpu())
 
     # Concatenate all results
-    all_bpd = torch.cat(all_bpd)
+    all_bpm = torch.cat(all_bpm)
     all_log_likelihood = torch.cat(all_log_likelihood)
     all_log_prior = torch.cat(all_log_prior)
     all_log_det_jacobian = torch.cat(all_log_det_jacobian)
 
     # Filter out invalid values (inf, nan)
-    valid_mask = torch.isfinite(all_bpd)
-    if valid_mask.sum() < len(all_bpd):
-        print(f"Warning: {(~valid_mask).sum()} samples had invalid BPD values")
-    
-    valid_bpd = all_bpd[valid_mask]
+    valid_mask = torch.isfinite(all_bpm)
+    if valid_mask.sum() < len(all_bpm):
+        print(f"Warning: {(~valid_mask).sum()} samples had invalid BPM values")
+
+    valid_bpm = all_bpm[valid_mask]
     valid_ll = all_log_likelihood[valid_mask]
     valid_prior = all_log_prior[valid_mask]
     valid_det = all_log_det_jacobian[valid_mask]
 
     return {
-        "bpd": float(valid_bpd.mean()) if len(valid_bpd) > 0 else float("inf"),
-        "bpd_std": float(valid_bpd.std()) if len(valid_bpd) > 0 else float("inf"),
+        "bpm": float(valid_bpm.mean()) if len(valid_bpm) > 0 else float("inf"),
+        "bpm_std": float(valid_bpm.std()) if len(valid_bpm) > 0 else float("inf"),
         "log_likelihood": float(valid_ll.mean()) if len(valid_ll) > 0 else float("-inf"),
         "log_prior": float(valid_prior.mean()) if len(valid_prior) > 0 else float("-inf"),
         "log_det_jacobian": float(valid_det.mean()) if len(valid_det) > 0 else 0.0,
@@ -1510,18 +1510,18 @@ def compute_bpd_from_model(
     }
 
 
-def compute_bpd_direct(
+def compute_bpm_direct(
     log_likelihood: Tensor,
     data_dim: int,
 ) -> Tensor:
     """
-    Convert log-likelihood to bits per dimension.
+    Convert log-likelihood to bits per mode.
 
     Args:
         log_likelihood: (B,) log p(x) values
         data_dim: Dimensionality of data
 
     Returns:
-        bpd: (B,) bits per dimension
+        bpm: (B,) bits per mode
     """
     return -log_likelihood / (data_dim * np.log(2))
