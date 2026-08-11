@@ -144,6 +144,8 @@ class SpectralHolographicEncoder(nn.Module):
         geometry: SliceGeometry = SliceGeometry.PLANAR,
         hsv_p: Optional[float] = None,
         hsv_propagator_mode: str = "bessel",
+        envelope_type: str = "ads",
+        envelope_match: str = "lsq",
     ) -> None:
         """
         Initialize spectral holographic encoder.
@@ -159,6 +161,17 @@ class SpectralHolographicEncoder(nn.Module):
             hsv_p: HSV parameter p (only used for HSV geometries to select propagator)
             hsv_propagator_mode: "bessel" for closed-form conformal product, 
                                  "emd" for full EMD ODE integration
+            envelope_type: Spectral envelope profile (referee control experiments):
+                "ads" (default, published Bessel propagator envelope),
+                "heat" (matched heat-kernel/Gaussian filter),
+                "matern" (matched Matérn-type filter),
+                "none" (identity envelope; Π̃ profile is zero so the momentum
+                channel is purely ancillary lift noise — physics-free spectral
+                baseline with identical phase-space dimension).
+                Non-"ads" envelopes are only supported for PLANAR geometry.
+            envelope_match: Parameter matching for "heat"/"matern":
+                "lsq" (least squares against the AdS envelope over the actual
+                mode grid; default) or "efold" (match the 1/e crossing).
         """
         super().__init__()
         self.d = d
@@ -170,6 +183,8 @@ class SpectralHolographicEncoder(nn.Module):
         self.geometry = geometry
         self.hsv_p = hsv_p
         self.hsv_propagator_mode = hsv_propagator_mode
+        self.envelope_type = envelope_type if envelope_type is not None else "ads"
+        self.envelope_match = envelope_match if envelope_match is not None else "lsq"
 
         deltas_t = torch.tensor(list(deltas), dtype=torch.float32)
         self.register_buffer("deltas", deltas_t)
@@ -193,6 +208,12 @@ class SpectralHolographicEncoder(nn.Module):
 
         if geometry == SliceGeometry.PLANAR:
             self._init_planar(n_modes, Lx, Ly, r_uv, regularization, deltas_t, nus)
+            if self.envelope_type != "ads":
+                # Referee control experiments: swap ONLY the two envelope
+                # tensors for a matched generic profile ("heat"/"matern") or
+                # the identity ("none"). Grid, phases, Laplacian, decode and
+                # everything downstream are untouched.
+                self._apply_generic_envelopes(r_uv, regularization, deltas_t)
         elif geometry == SliceGeometry.FLAT:
             # ABLATION: Use flat-space propagator (simple exponential decay)
             # For massive scalar in flat space: Φ_k(r) ∝ exp(-√(k²+m²) r)
@@ -204,6 +225,74 @@ class SpectralHolographicEncoder(nn.Module):
             self._init_hsv_planar(n_modes, Lx, Ly, r_uv, regularization, deltas_t, hsv_p)
         else:
             raise ValueError(f"Unknown geometry: {geometry}")
+
+        if self.envelope_type != "ads" and geometry != SliceGeometry.PLANAR:
+            raise ValueError(
+                f"envelope_type='{self.envelope_type}' is only supported for the "
+                f"PLANAR geometry (referee control experiments); got geometry={geometry}."
+            )
+
+    def _apply_generic_envelopes(
+        self,
+        r_uv: float,
+        regularization: float,
+        deltas_t: Tensor,
+    ) -> None:
+        """
+        Overwrite the (phi, pi) envelope buffers with a generic profile.
+
+        Referee request (Report 1): (a) a spectral CNN baseline with the same
+        Fourier representation / phase-space dimension / architecture but
+        WITHOUT the AdS propagator envelope ("none"), and (b) a comparison of
+        the AdS envelope against generic coarse-to-fine spectral filters
+        ("heat", "matern") implemented in the same pipeline.
+
+        All profiles share the AdS radial schedule ξ = |k| e^{-r}; only the
+        filter shape differs. See encoding_envelopes.py for the full math and
+        the deterministic parameter matching. The k grid built by
+        _init_planar (including the ε-regularised |k| and the k=0-mode
+        normalisation convention) is reused verbatim.
+        """
+        from ads_cft.encoding_envelopes import (
+            build_generic_envelopes,
+            format_envelope_info,
+        )
+
+        envelopes_phi = []
+        envelopes_pi = []
+        self.envelope_info = []
+        for c in range(self.n_channels):
+            delta = float(deltas_t[c])
+            phi_env, pi_env, info = build_generic_envelopes(
+                self.k_mag,
+                delta=delta,
+                d=self.d,
+                r_uv=r_uv,
+                regularization=regularization,
+                envelope_type=self.envelope_type,
+                match=self.envelope_match,
+            )
+            envelopes_phi.append(phi_env)
+            envelopes_pi.append(pi_env)
+            self.envelope_info.append(info)
+            print(
+                f"[SPECTRAL] channel {c}: "
+                + format_envelope_info(self.envelope_type, self.envelope_match, info),
+                flush=True,
+            )
+
+        if self.envelope_type == "none":
+            print(
+                "[SPECTRAL] envelope_type='none' is the physics-free spectral "
+                "baseline: run it with --backbone_scale 0.0 and "
+                "--no-use_omega_weighting (no KG backbone, no warped loss).",
+                flush=True,
+            )
+
+        # Assigning tensors to existing buffer names updates the registered
+        # buffers in-place (nn.Module.__setattr__ routes to self._buffers).
+        self.envelopes_phi = torch.stack(envelopes_phi, dim=0)
+        self.envelopes_pi = torch.stack(envelopes_pi, dim=0)
 
     def _init_planar(
         self,
@@ -961,6 +1050,9 @@ class SpectralHolographicCodec(nn.Module):
         geometry: SliceGeometry = SliceGeometry.PLANAR,
         hsv_p: Optional[float] = None,
         hsv_propagator_mode: str = "bessel",
+        # Referee control experiments: envelope profile selection
+        envelope_type: str = "ads",
+        envelope_match: str = "lsq",
     ) -> None:
         """
         Initialize spectral holographic codec.
@@ -995,6 +1087,8 @@ class SpectralHolographicCodec(nn.Module):
             geometry=geometry,
             hsv_p=hsv_p,
             hsv_propagator_mode=hsv_propagator_mode,
+            envelope_type=envelope_type,
+            envelope_match=envelope_match,
         )
         self.d = d
         self.n_channels = len(deltas)

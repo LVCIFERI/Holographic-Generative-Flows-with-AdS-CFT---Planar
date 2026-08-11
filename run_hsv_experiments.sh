@@ -123,6 +123,8 @@ run_planar_hsv() {
             --hsv_use_u_bounds \
             --hsv_u_uv 0.3678794 \
             --path_type hermite \
+        --lift_noise_sigma 0.1 \
+        --lift_noise_sigma 0.1 \
             --use_spectral_encoding \
             --spectral_n_modes $SPECTRAL_MODES \
             --cnn_hidden $HIDDEN \

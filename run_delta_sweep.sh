@@ -42,6 +42,8 @@ for delta in "${DELTA_VALUES[@]}"; do
         --dataset checkerboard \
         --slice_geometry planar \
         --path_type hermite \
+        --lift_noise_sigma 0.1 \
+        --lift_noise_sigma 0.1 \
         --use_ema \
         --use_spectral_encoding \
         --spectral_n_modes $SPECTRAL_MODES \

@@ -56,7 +56,7 @@ ODE_SOLVER="rk4"
 ODE_N_STEPS=100
 
 # UV lift noise
-LIFT_NOISE_SIGMA=0.1
+LIFT_NOISE_SIGMA=${LIFT_NOISE_SIGMA:-0.1}
 
 # Seed configuration
 N_SEEDS=${N_SEEDS:-3}

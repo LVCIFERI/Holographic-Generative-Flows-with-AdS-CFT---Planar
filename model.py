@@ -753,6 +753,9 @@ class UVStabilizedFlowMatchingModel(nn.Module):
             geometry=self.geometry.slice_geometry,
             hsv_p=hsv_p,
             hsv_propagator_mode=hsv_propagator_mode,
+            # Referee control experiments: envelope profile selection
+            envelope_type=getattr(config, "spectral_envelope_type", "ads"),
+            envelope_match=getattr(config, "spectral_envelope_match", "lsq"),
         )
 
         self.slice_op = self.spectral_codec.get_laplacian()

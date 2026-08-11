@@ -445,7 +445,7 @@ class FlowModelConfig:
     r_uv: float = 1.0
 
     # UV lift noise (Section 5.1)
-    lift_noise_sigma: float = 0.1
+    lift_noise_sigma: float = 0.0  # revised default; v1 used 0.1
 
     # IR prior (Section 7)
     # Sobolev-type: σ²(λ) = c(1+λ)^{-s}
@@ -501,7 +501,17 @@ class FlowModelConfig:
     spectral_decode_resolution: int = 64
     spectral_decode_method: str = "softargmax"
     spectral_random_feature_scale: float = 1.0
-    
+
+    # Spectral envelope profile (referee control experiments):
+    # "ads" (default, published Bessel propagator), "heat" (matched
+    # heat-kernel/Gaussian filter), "matern" (matched Matérn-type filter),
+    # "none" (identity envelope, Π̃ purely ancillary lift noise —
+    # physics-free spectral baseline). PLANAR geometry only for non-"ads".
+    spectral_envelope_type: str = "ads"
+    # Matching for "heat"/"matern": "lsq" (least squares against the AdS
+    # envelope over the actual mode grid) or "efold" (match 1/e crossing).
+    spectral_envelope_match: str = "lsq"
+
     # HSV propagator mode for spectral encoding
     # "bessel": Closed-form Bessel solution (conformal product, fast)
     # "emd": Full EMD ODE integration (exact, slower)
@@ -868,7 +878,7 @@ class ExperimentConfig:
     r_uv: float = 1.0
 
     # UV lift (Document Section 5.1)
-    lift_noise_sigma: float = 0.1
+    lift_noise_sigma: float = 0.0  # revised default; v1 used 0.1
 
     # IR prior (Document Section 7)
     prior_c_phi: float = 1.0
@@ -905,6 +915,12 @@ class ExperimentConfig:
     spectral_decode_resolution: int = 64
     spectral_decode_method: str = "softargmax"
     spectral_random_feature_scale: float = 1.0
+
+    # Spectral envelope profile (referee control experiments):
+    # "ads" | "heat" | "matern" | "none"; see FlowModelConfig for details.
+    spectral_envelope_type: str = "ads"
+    # Matching mode for "heat"/"matern": "lsq" | "efold".
+    spectral_envelope_match: str = "lsq"
 
     # Shared field encoding parameters
     field_grid_size: Tuple[int, int] = (32, 32)

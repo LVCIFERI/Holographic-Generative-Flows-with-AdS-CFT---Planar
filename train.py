@@ -885,6 +885,8 @@ def create_model(
         spectral_decode_resolution=config.spectral_decode_resolution,
         spectral_decode_method=config.spectral_decode_method,
         spectral_random_feature_scale=config.spectral_random_feature_scale,
+        spectral_envelope_type=getattr(config, "spectral_envelope_type", "ads"),
+        spectral_envelope_match=getattr(config, "spectral_envelope_match", "lsq"),
         # Holographic encoding options
         use_holographic_encoding=config.use_holographic_encoding,  # Grid-free
         use_holographic_grid=config.use_holographic_grid,  # Grid-based
@@ -932,6 +934,7 @@ def evaluate_model(
     compute_bpm: bool = False,
     bpm_n_samples: int = 100,
     bpm_n_hutchinson: int = 1,
+    save_samples_tensor: bool = False,
 ) -> Dict[str, float]:
     """
     Evaluate model by generating samples.
@@ -976,6 +979,14 @@ def evaluate_model(
         start_time = time.time()
         samples = model.sample(n_gen)
         gen_time = time.time() - start_time
+    
+    # Persist the exact generated set used for the reported metrics so that
+    # any metric (including new ones requested in review) can be recomputed
+    # later without re-training or even re-loading model weights.
+    if save_samples_tensor and save_dir is not None:
+        samples_path = Path(save_dir) / "samples_final.pt"
+        torch.save(samples.detach().cpu(), samples_path)
+        print(f"[EVAL] Saved generated samples tensor to {samples_path}", flush=True)
     
     print(f"[EVAL] Samples shape: {samples.shape}", flush=True)
     print(f"[EVAL] Samples mean: {samples.mean():.4f}, std: {samples.std():.4f}", flush=True)
@@ -1159,6 +1170,20 @@ def train(config: ExperimentConfig) -> Dict[str, Any]:
     
     # Save config
     save_config(config, str(output_dir / "config.json"))
+    
+    # Record the exact code revision (referee: immutable commit + complete
+    # configurations for all reported experiments). Silently skipped if the
+    # code is not run from inside a git checkout.
+    try:
+        import subprocess
+        _commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True, text=True, cwd=str(Path(__file__).resolve().parent),
+        ).stdout.strip()
+        if _commit:
+            (output_dir / "git_commit.txt").write_text(_commit + "\n")
+    except Exception:
+        pass
     
     # Log experiment signature
     exp_signature = get_experiment_signature(config)
@@ -1392,6 +1417,7 @@ def train(config: ExperimentConfig) -> Dict[str, Any]:
         compute_bpm=True,  # Enable BPM computation for final evaluation
         bpm_n_samples=min(500, len(real_data_for_viz)) if real_data_for_viz is not None else 100,
         bpm_n_hutchinson=1,
+        save_samples_tensor=True,  # persist the exact reported sample set
     )
     results["final_eval"] = final_metrics
     
@@ -1700,6 +1726,22 @@ def parse_args() -> argparse.Namespace:
     # ==========================================================================
     parser.add_argument("--use_field_encoding", action="store_true", help="Enable GAUSSIAN field encoding")
     parser.add_argument("--use_spectral_encoding", action="store_true", help="Enable SPECTRAL encoding")
+    parser.add_argument(
+        "--spectral_envelope_type", type=str, default=None,
+        choices=["ads", "heat", "matern", "none"],
+        help=(
+            "Spectral envelope profile (referee control experiments): "
+            "'ads' (default, Bessel propagator), 'heat' (matched Gaussian filter), "
+            "'matern' (matched Matérn-type filter), 'none' (identity envelope, "
+            "Π̃ ancillary — physics-free spectral baseline; combine with "
+            "--backbone_scale 0.0 --no-use_omega_weighting)."
+        ),
+    )
+    parser.add_argument(
+        "--spectral_envelope_match", type=str, default=None,
+        choices=["lsq", "efold"],
+        help="Parameter matching for heat/matern envelopes: 'lsq' (default) or 'efold'.",
+    )
     parser.add_argument("--spectral_n_modes", type=int, default=None, help="Fourier modes")
     parser.add_argument("--spectral_decode_resolution", type=int, default=None, help="Decode resolution")
     parser.add_argument("--spectral_decode_method", type=str, default=None, choices=["softargmax", "phase", "density"])
